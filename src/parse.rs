@@ -56,17 +56,10 @@ fn parse_statement(statement: Stmt) -> ParseResult<ParseNode> {
         StmtKind::Delete { targets: _ } => todo!("Delete"),
         StmtKind::Assign { targets, value, .. } => parse_assignment(first(targets)?, *value),
         StmtKind::AugAssign { target, op, value } => {
-            let name = get_name(*target.clone())?;
-            let left = Box::new(parse_expression(*target)?);
-            let right = Box::new(parse_expression(*value)?);
-            let expr = Expr::Op {
-                left,
+            Ok(Node::OpAssign {
+                target: get_name(*target)?,
                 op: convert_op(op),
-                right,
-            };
-            Ok(Node::Assign {
-                target: name,
-                value: Box::new(expr),
+                value: Box::new(parse_expression(*value)?),
             })
         }
         StmtKind::AnnAssign { target, value, .. } => match value {

@@ -38,6 +38,9 @@ impl Frame {
             Node::Assign { target, value } => {
                 self.assign(*target, value)?;
             },
+            Node::OpAssign { target, op, value } => {
+                self.op_assign(*target, op, &value)?;
+            },
             Node::For {
                 target,
                 iter,
@@ -97,6 +100,25 @@ impl Frame {
         Ok(())
     }
 
+    fn op_assign(&mut self, target: usize, op: &Operator, value: &RunExpr) -> RunResult<()> {
+        let right_value = match self.execute_expr(value)? {
+            Cow::Borrowed(value) => value.clone(),
+            Cow::Owned(value) => value,
+        };
+        if let Some(target_value) = self.namespace.get_mut(target) {
+            let ok = match op {
+                Operator::Add => target_value.add_mut(right_value),
+                _ => return Err(format!("Assign operator {op:?} not yet implemented").into()),
+            };
+            match ok {
+                true => Ok(()),
+                false => Err(format!("Cannot apply assign operator {op:?} {value:?}").into()),
+            }
+        } else {
+            Err(format!("name '{target}' is not defined").into())
+        }
+    }
+
     fn call_function(&self, builtin: &Builtins, args: &[RunExpr]) -> RunResult<Cow<Value>> {
         match builtin {
             Builtins::Print => {
@@ -119,6 +141,17 @@ impl Frame {
                     match value.as_ref() {
                         Value::Int(size) => Ok(Cow::Owned(Value::Range(*size))),
                         _ => Err("range() argument must be an integer".into()),
+                    }
+                }
+            },
+            Builtins::Len => {
+                if args.len() != 1 {
+                    Err(format!("len() takes exactly exactly one argument ({} given)", args.len()).into())
+                } else {
+                    let value = self.execute_expr(&args[0])?;
+                    match value.len() {
+                        Some(len) => Ok(Cow::Owned(Value::Int(len as i64))),
+                        None => Err(format!("Object of type {value} has no len()").into()),
                     }
                 }
             }

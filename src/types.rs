@@ -66,6 +66,11 @@ pub(crate) enum Node<Vars, Funcs> {
         target: Vars,
         value: Box<Expr<Vars, Funcs>>,
     },
+    OpAssign {
+        target: Vars,
+        op: Operator,
+        value: Box<Expr<Vars, Funcs>>,
+    },
     For {
         target: Expr<Vars, Funcs>,
         iter: Expr<Vars, Funcs>,
@@ -84,6 +89,7 @@ pub(crate) enum Node<Vars, Funcs> {
 pub(crate) enum Builtins {
     Print,
     Range,
+    Len,
 }
 
 impl Builtins {
@@ -91,6 +97,7 @@ impl Builtins {
         match name {
             "print" => Ok(Self::Print),
             "range" => Ok(Self::Range),
+            "len" => Ok(Self::Len),
             _ => Err(format!("unknown function: {}", name).into()),
         }
     }
@@ -189,6 +196,22 @@ impl Value {
         }
     }
 
+    pub fn add_mut(&mut self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Int(v1), Self::Int(v2)) => {
+                *v1 += v2;
+            },
+            (Self::Str(v1), Self::Str(v2)) => {
+                v1.push_str(&v2);
+            }
+            (Self::List(v1), Self::List(v2)) => {
+                v1.extend(v2);
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub fn sub(&self, other: &Self) -> Option<Self> {
         match (self, other) {
             (Self::Int(v1), Self::Int(v2)) => Some(Self::Int(v1 - v2)),
@@ -247,6 +270,16 @@ impl Value {
             (Self::Float(v1), Self::Float(v2)) => Some(Self::Float(v1 % v2)),
             (Self::Float(v1), Self::Int(v2)) => Some(Self::Float(v1 % (*v2 as f64))),
             (Self::Int(v1), Self::Float(v2)) => Some(Self::Float((*v1 as f64) % v2)),
+            _ => None,
+        }
+    }
+
+    pub fn len(&self) -> Option<usize> {
+        match self {
+            Self::Str(v) => Some(v.len()),
+            Self::Bytes(v) => Some(v.len()),
+            Self::List(v) => Some(v.len()),
+            Self::Tuple(v) => Some(v.len()),
             _ => None,
         }
     }

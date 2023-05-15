@@ -31,6 +31,11 @@ fn prepare_nodes(nodes: Vec<Node<String, String>>, namespace: &mut Namespace) ->
                 let value = Box::new(prepare_expression(*value, namespace)?);
                 new_nodes.push(Node::Assign { target, value });
             }
+            Node::OpAssign { target, op, value } => {
+                let target = namespace.get_id(target);
+                let value = Box::new(prepare_expression(*value, namespace)?);
+                new_nodes.push(Node::OpAssign { target, op, value });
+            }
             Node::For {
                 target,
                 iter,
