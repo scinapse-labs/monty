@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use crate::evaluate::Evaluator;
 use crate::exceptions::{exc, exc_err, Exception, InternalRunError, RunError, StackFrame};
 use crate::object::Object;
-use crate::types::{CodeRange, Exit, ExprLoc, Identifier, Node, Operator};
+use crate::parse::CodeRange;
+use crate::types::{Exit, ExprLoc, Identifier, Node, Operator};
 
 pub type RunResult<T> = Result<T, RunError>;
 
@@ -60,11 +61,15 @@ impl RunFrame {
 
     fn execute_expr<'a>(&'a self, expr: &'a ExprLoc) -> RunResult<Cow<Object>> {
         // TODO: does creating this struct harm performance, or is it optimised out?
-        Evaluator::new(&self.namespace).evaluate(expr).map_err(|e| self.set_name(e))
+        Evaluator::new(&self.namespace)
+            .evaluate(expr)
+            .map_err(|e| self.set_name(e))
     }
 
     fn execute_expr_bool(&self, expr: &ExprLoc) -> RunResult<bool> {
-        Evaluator::new(&self.namespace).evaluate_bool(expr).map_err(|e| self.set_name(e))
+        Evaluator::new(&self.namespace)
+            .evaluate_bool(expr)
+            .map_err(|e| self.set_name(e))
     }
 
     fn assign(&mut self, target: &Identifier, object: &ExprLoc) -> RunResult<()> {

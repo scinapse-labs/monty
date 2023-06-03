@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::fmt;
+
 use num::ToPrimitive;
 use rustpython_parser::ast::{
     Boolop, Cmpop, Constant, Expr as AstExpr, ExprKind, Keyword, Operator as AstOperator, Stmt, StmtKind, TextRange,
@@ -6,7 +9,7 @@ use rustpython_parser::parse_program;
 
 use crate::object::Object;
 use crate::parse_error::{ParseError, ParseResult};
-use crate::types::{CmpOperator, CodePosition, CodeRange, Expr, ExprLoc, Function, Identifier, Kwarg, Node, Operator};
+use crate::types::{CmpOperator, Expr, ExprLoc, Function, Identifier, Kwarg, Node, Operator};
 
 pub(crate) fn parse(code: &str, filename: &str) -> ParseResult<Vec<Node>> {
     match parse_program(code, filename) {
@@ -15,13 +18,14 @@ pub(crate) fn parse(code: &str, filename: &str) -> ParseResult<Vec<Node>> {
     }
 }
 
-pub struct Parser<'a> {
+pub(crate) struct Parser<'a> {
     line_ends: Vec<usize>,
-    filename: &'a str
+    code: &'a str,
+    filename: &'a str,
 }
 
 impl<'a> Parser<'a> {
-    fn new(code: &str, filename: &'a str) -> Self {
+    fn new(code: &'a str, filename: &'a str) -> Self {
         // position of each line in the source code, to convert indexes to line number and column number
         let mut line_ends = vec![];
         for (i, c) in code.chars().enumerate() {
@@ -29,7 +33,11 @@ impl<'a> Parser<'a> {
                 line_ends.push(i);
             }
         }
-        Self { filename, line_ends }
+        Self {
+            line_ends,
+            code,
+            filename,
+        }
     }
 
     fn parse_statements(&self, statements: Vec<Stmt>) -> ParseResult<Vec<Node>> {
@@ -283,22 +291,24 @@ impl<'a> Parser<'a> {
     }
 
     fn convert_range(&self, range: &TextRange) -> CodeRange {
-        CodeRange::new(
-            self.filename,
-            self.index_to_position(range.start().into()),
-            self.index_to_position(range.end().into()),
-        )
+        let start = range.start().into();
+        let end = range.end().into();
+        let (start, preview_line) = self.index_to_position(start);
+        let (end, _) = self.index_to_position(end);
+        CodeRange::new(self.filename, start, end, preview_line)
     }
 
-    fn index_to_position(&self, index: usize) -> CodePosition {
+    fn index_to_position(&self, index: usize) -> (CodeLoc, &str) {
         let mut last = 0;
         for (line_no, line_end) in self.line_ends.iter().enumerate() {
             if index <= *line_end {
-                return CodePosition::new(line_no + 1, index - last);
+                let line = &self.code[last + 1..*line_end];
+                return (CodeLoc::new(line_no + 1, index - last), line);
             }
             last = *line_end;
         }
-        CodePosition::new(self.line_ends.len() + 1, index - last)
+        let line = &self.code[last + 1..];
+        (CodeLoc::new(self.line_ends.len() + 1, index - last), line)
     }
 }
 
@@ -376,4 +386,85 @@ fn convert_const(c: Constant) -> ParseResult<Object> {
         Constant::Ellipsis => Object::Ellipsis,
     };
     Ok(v)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CodeRange {
+    filename: String,
+    preview_line: Option<String>,
+    start: CodeLoc,
+    end: CodeLoc,
+}
+
+impl fmt::Display for CodeRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} to {:?}", self.start, self.end)
+    }
+}
+
+impl CodeRange {
+    fn new(filename: &str, start: CodeLoc, end: CodeLoc, preview_line: &str) -> Self {
+        Self {
+            filename: filename.to_string(),
+            preview_line: if start.line == end.line {
+                Some(preview_line.to_string())
+            } else {
+                None
+            },
+            start,
+            end,
+        }
+    }
+
+    pub fn extend(&self, end: &CodeRange) -> Self {
+        Self {
+            filename: self.filename.clone(),
+            preview_line: if self.start.line == end.end.line {
+                self.preview_line.clone()
+            } else {
+                None
+            },
+            start: self.start,
+            end: end.end,
+        }
+    }
+
+    pub fn traceback(&self, f: &mut fmt::Formatter<'_>, frame_name: Option<&Cow<str>>) -> fmt::Result {
+        if let Some(frame_name) = frame_name {
+            writeln!(
+                f,
+                r#"  File "{}", line {}, in {frame_name}"#,
+                self.filename, self.start.line
+            )?;
+        } else {
+            writeln!(
+                f,
+                r#"  File "{}", line {}, in <unknown frame>"#,
+                self.filename, self.start.line
+            )?;
+        }
+
+        if let Some(ref line) = self.preview_line {
+            writeln!(f, "    {line}")?;
+            write!(f, "{}", " ".repeat(4 - 1 + self.start.column as usize))?;
+            writeln!(f, "{}", "~".repeat((self.end.column - self.start.column) as usize))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CodeLoc {
+    line: u32,
+    column: u32,
+}
+
+impl CodeLoc {
+    fn new(line: usize, column: usize) -> Self {
+        Self {
+            line: line as u32,
+            column: column as u32,
+        }
+    }
 }

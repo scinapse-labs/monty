@@ -43,8 +43,8 @@ impl Executor {
             Ok(v) => Ok(v),
             Err(e) => match e {
                 RunError::Exc(exc) => Ok(Exit::Raise(exc)),
-                RunError::Internal(internal) => Err(internal)
-            }
+                RunError::Internal(internal) => Err(internal),
+            },
         }
     }
 }

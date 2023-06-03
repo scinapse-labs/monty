@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::fmt;
 
 use crate::exceptions::{exc, exc_err};
 use crate::exceptions::{Exception, InternalRunError};
@@ -62,9 +63,7 @@ impl<'a> Evaluator<'a> {
         };
         match op_object {
             Some(object) => Ok(Cow::Owned(object)),
-            None => Err(exc!(Exception::TypeError; "Cannot apply operator {left} {op} {right}")
-                .with_position(&left.position.extend(&right.position))
-                .into()),
+            None => self._op_type_error(left, op, right, left_object, right_object),
         }
     }
 
@@ -82,10 +81,25 @@ impl<'a> Evaluator<'a> {
         };
         match op_object {
             Some(object) => Ok(object),
-            None => Err(exc!(Exception::TypeError; "Cannot apply operator {left} {op} {right}")
-                .with_position(&left.position.extend(&right.position))
-                .into()),
+            None => self._op_type_error(left, op, right, left_object, right_object),
         }
+    }
+
+    fn _op_type_error<T>(
+        &self,
+        left: &ExprLoc,
+        op: impl fmt::Display,
+        right: &ExprLoc,
+        left_object: Cow<Object>,
+        right_object: Cow<Object>,
+    ) -> RunResult<T> {
+        let left_type = left_object.type_str();
+        let right_type = right_object.type_str();
+        Err(
+            exc!(Exception::TypeError; "unsupported operand type(s) for {op}: '{left_type}' and '{right_type}'")
+                .with_position(&left.position.extend(&right.position))
+                .into(),
+        )
     }
 
     pub fn call_function(

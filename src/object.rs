@@ -194,6 +194,25 @@ impl Object {
             _ => exc_err!(Exception::TypeError; "'{self:?}' object cannot be interpreted as an integer"),
         }
     }
+
+    // TODO this should be replaced by a proper ObjectType enum
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            Self::Undefined => "undefined",
+            Self::Ellipsis => "ellipsis",
+            Self::None => "NoneType",
+            Self::True => "bool",
+            Self::False => "bool",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Str(_) => "str",
+            Self::Bytes(_) => "bytes",
+            Self::List(_) => "list",
+            Self::Tuple(_) => "tuple",
+            Self::Range(_) => "range",
+            Self::Exc(e) => e.type_str(),
+        }
+    }
 }
 
 fn vecs_equal(v1: &[Object], v2: &[Object]) -> Option<bool> {

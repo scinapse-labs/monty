@@ -1,7 +1,9 @@
-use crate::exceptions::{exc_err, ExceptionRaise};
 use std::fmt;
 
+use crate::exceptions::{exc_err, ExceptionRaise};
+
 use crate::object::Object;
+use crate::parse::CodeRange;
 use crate::parse_error::{ParseError, ParseResult};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -75,56 +77,6 @@ impl fmt::Display for CmpOperator {
             Self::In => write!(f, "in"),
             Self::NotIn => write!(f, "not in"),
         }
-    }
-}
-
-// TODO rename to CodeLocation to avoid confusion with "position" elsewhere
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CodePosition {
-    // TODO add File
-    line: u32,
-    column: u32,
-}
-
-impl fmt::Display for CodePosition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.line, self.column)
-    }
-}
-
-impl CodePosition {
-    pub fn new(line: usize, column: usize) -> Self {
-        Self {
-            line: line as u32,
-            column: column as u32,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CodeRange {
-    filename: String,
-    start: CodePosition,
-    end: CodePosition,
-}
-
-impl fmt::Display for CodeRange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} - {}", self.start, self.end)
-    }
-}
-
-impl CodeRange {
-    pub fn new(filename: &str, start: CodePosition, end: CodePosition) -> Self {
-        Self { filename: filename.to_string(), start, end }
-    }
-
-    pub fn extend(&self, end: &CodeRange) -> Self {
-        Self::new(&self.filename, self.start, end.end)
-    }
-
-    pub fn line(&self) -> String {
-        format!(r#"File "{}", line {}"#, self.filename, self.start.line)
     }
 }
 

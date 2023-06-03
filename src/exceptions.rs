@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::types::CodeRange;
+use crate::parse::CodeRange;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Exception {
@@ -22,10 +22,15 @@ impl fmt::Display for Exception {
 
 impl Exception {
     pub(crate) fn str_with_type(&self) -> String {
+        format!("{}: {self}", self.type_str())
+    }
+
+    // TODO should also be replaced by ObjectType enum
+    pub(crate) fn type_str(&self) -> &'static str {
         match self {
-            Self::ValueError(s) => format!("ValueError: {s}"),
-            Self::TypeError(s) => format!("TypeError: {s}"),
-            Self::NameError(s) => format!("NameError: {s}"),
+            Self::ValueError(_) => "ValueError",
+            Self::TypeError(_) => "TypeError",
+            Self::NameError(_) => "NameError",
         }
     }
 
@@ -100,12 +105,7 @@ impl fmt::Display for StackFrame {
             write!(f, "{}", parent)?;
         }
 
-        if let Some(ref frame_name) = self.frame_name {
-            writeln!(f, "  {}, in {}", self.position.line(), frame_name)?;
-        } else {
-            writeln!(f, "  {}, in <unknown frame>", self.position.line())?;
-        }
-        writeln!(f, "    TODO - line preview")
+        self.position.traceback(f, self.frame_name.as_ref())
     }
 }
 
@@ -126,7 +126,6 @@ impl StackFrame {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub enum InternalRunError {
