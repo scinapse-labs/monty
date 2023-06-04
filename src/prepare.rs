@@ -175,8 +175,8 @@ impl Prepare {
 
     /// either return the id for a name, or insert that name and get its ID
     /// returns (id, whether the id is newly added)
-    fn get_id(&mut self, ident: Identifier) -> (Identifier, bool) {
-        let (id, is_new) = match self.name_map.entry(ident.name.clone()) {
+    fn get_id<'c>(&mut self, ident: Identifier<'c>) -> (Identifier<'c>, bool) {
+        let (id, is_new) = match self.name_map.entry(ident.name.to_string()) {
             Entry::Occupied(e) => {
                 let id = e.get();
                 (*id, false)
@@ -189,7 +189,14 @@ impl Prepare {
                 (id, true)
             }
         };
-        (Identifier { name: ident.name, id }, is_new)
+        (
+            Identifier {
+                name: ident.name,
+                id,
+                position: ident.position,
+            },
+            is_new,
+        )
     }
 }
 

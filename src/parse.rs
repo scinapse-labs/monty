@@ -259,7 +259,7 @@ impl<'c> Parser<'c> {
             ExprKind::Starred { value: _, ctx: _ } => Err(ParseError::Todo("Starred")),
             ExprKind::Name { id, .. } => Ok(ExprLoc::new(
                 self.convert_range(&range),
-                Expr::Name(Identifier::from_name(id)),
+                Expr::Name(Identifier::from_name(id, self.convert_range(&expression.range))),
             )),
             ExprKind::List { elts: _, ctx: _ } => Err(ParseError::Todo("List")),
             ExprKind::Tuple { elts: _, ctx: _ } => Err(ParseError::Todo("Tuple")),
@@ -273,16 +273,16 @@ impl<'c> Parser<'c> {
 
     fn parse_kwargs(&self, kwarg: Keyword) -> ParseResult<'c, Kwarg<'c>> {
         let key = match kwarg.node.arg {
-            Some(key) => Identifier::from_name(key),
+            Some(key) => Identifier::from_name(key, self.convert_range(&kwarg.range)),
             None => return Err(ParseError::Todo("kwargs with no key")),
         };
         let value = self.parse_expression(kwarg.node.value)?;
         Ok(Kwarg { key, value })
     }
 
-    fn parse_identifier(&self, ast: AstExpr) -> ParseResult<'c, Identifier> {
+    fn parse_identifier(&self, ast: AstExpr) -> ParseResult<'c, Identifier<'c>> {
         match ast.node {
-            ExprKind::Name { id, .. } => Ok(Identifier::from_name(id)),
+            ExprKind::Name { id, .. } => Ok(Identifier::from_name(id, self.convert_range(&ast.range))),
             _ => Err(ParseError::Internal(
                 format!("Expected name, got {:?}", ast.node).into(),
             )),

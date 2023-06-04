@@ -1,7 +1,8 @@
-use crate::exceptions::{exc_err, Exception, InternalRunError};
-use crate::run::RunResult;
 use std::cmp::Ordering;
 use std::fmt;
+
+use crate::exceptions::{exc_err, Exception, InternalRunError};
+use crate::run::RunResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {

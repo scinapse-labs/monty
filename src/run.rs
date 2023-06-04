@@ -59,7 +59,7 @@ impl<'c> RunFrame<'c> {
     }
 
     fn execute_expr<'d>(&'d self, expr: &'d ExprLoc<'c>) -> RunResult<'c, Cow<'d, Object>> {
-        // TODO: does creating this struct harm performance, or is it optimised out?
+        // it seems the struct creation is optimized away, and has no cost
         match Evaluator::new(&self.namespace).evaluate(expr) {
             Ok(object) => Ok(object),
             Err(mut e) => {
@@ -79,12 +79,12 @@ impl<'c> RunFrame<'c> {
         }
     }
 
-    fn assign(&mut self, target: &Identifier, object: &ExprLoc<'c>) -> RunResult<'c, ()> {
+    fn assign(&mut self, target: &Identifier<'c>, object: &ExprLoc<'c>) -> RunResult<'c, ()> {
         self.namespace[target.id] = self.execute_expr(object)?.into_owned();
         Ok(())
     }
 
-    fn op_assign(&mut self, target: &Identifier, op: &Operator, object: &ExprLoc<'c>) -> RunResult<'c, ()> {
+    fn op_assign(&mut self, target: &Identifier<'c>, op: &Operator, object: &ExprLoc<'c>) -> RunResult<'c, ()> {
         let right_object = self.execute_expr(object)?.into_owned();
         if let Some(target_object) = self.namespace.get_mut(target.id) {
             let r = match op {
@@ -100,8 +100,8 @@ impl<'c> RunFrame<'c> {
                 Ok(())
             }
         } else {
-            // TODO stack_frame once position is added to identifier
-            Err(Exception::NameError(target.name.clone().into()).into())
+            let e = Exception::NameError(target.name.to_string().into());
+            Err(e.with_frame(self.stack_frame(&target.position)).into())
         }
     }
 

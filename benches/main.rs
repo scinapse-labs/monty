@@ -18,7 +18,11 @@ fn add_two(bench: &mut Bencher) {
     }
 
     bench.iter(|| {
-        black_box(ex.run(vec![]).unwrap());
+        let r = match ex.run(vec![]).unwrap() {
+            Exit::Return(Object::Int(v)) => v,
+            _ => -1,
+        };
+        black_box(r);
     });
 }
 
@@ -50,6 +54,7 @@ fn add_two_cpython(bench: &mut Bencher) {
     });
 }
 
+// language=Python
 const LOOP_MOD_13_CODE: &str = "
 v = ''
 for i in range(100):
@@ -77,6 +82,7 @@ fn loop_mod_13_cpython(bench: &mut Bencher) {
     Python::with_gil(|py| {
         let fun: PyObject = PyModule::from_code(
             py,
+            // language=Python
             "def main():
                 v = ''
                 for i in range(100):

@@ -100,31 +100,31 @@ impl<'c> ExprLoc<'c> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Identifier {
-    // TODO pub position: CodeRange,
-    pub name: String,
+pub(crate) struct Identifier<'c> {
+    pub position: CodeRange<'c>,
+    pub name: String, // TODO could this a `&'c str` or cow?
     pub id: usize,
 }
 
-impl Identifier {
-    pub fn from_name(name: String) -> Self {
-        Self { name, id: 0 }
+impl<'c> Identifier<'c> {
+    pub fn from_name(name: String, position: CodeRange<'c>) -> Self {
+        Self { name, position, id: 0 }
     }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Kwarg<'c> {
-    pub key: Identifier,
+    pub key: Identifier<'c>,
     pub value: ExprLoc<'c>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Function {
+pub(crate) enum Function<'c> {
     Builtin(Builtins),
-    Ident(Identifier),
+    Ident(Identifier<'c>),
 }
 
-impl fmt::Display for Function {
+impl<'c> fmt::Display for Function<'c> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Builtin(b) => write!(f, "{b}"),
@@ -133,7 +133,7 @@ impl fmt::Display for Function {
     }
 }
 
-impl Function {
+impl<'c> Function<'c> {
     /// whether the function has side effects
     pub fn side_effects(&self) -> bool {
         match self {
@@ -146,9 +146,9 @@ impl Function {
 #[derive(Debug, Clone)]
 pub(crate) enum Expr<'c> {
     Constant(Object),
-    Name(Identifier),
+    Name(Identifier<'c>),
     Call {
-        func: Function,
+        func: Function<'c>,
         args: Vec<ExprLoc<'c>>,
         kwargs: Vec<Kwarg<'c>>,
     },
@@ -220,16 +220,16 @@ pub(crate) enum Node<'c> {
     Return(ExprLoc<'c>),
     ReturnNone,
     Assign {
-        target: Identifier,
+        target: Identifier<'c>,
         object: ExprLoc<'c>,
     },
     OpAssign {
-        target: Identifier,
+        target: Identifier<'c>,
         op: Operator,
         object: ExprLoc<'c>,
     },
     For {
-        target: Identifier,
+        target: Identifier<'c>,
         iter: ExprLoc<'c>,
         body: Vec<Node<'c>>,
         or_else: Vec<Node<'c>>,
