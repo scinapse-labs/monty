@@ -208,6 +208,27 @@ pub enum HeapData {
 
 ## Implementation Plan
 
+### Phase 0: Literal Object Layer (New)
+
+**Goal**: Introduce a dedicated `Literal` representation so parse/prepare stages can continue folding/inspecting constants without depending on runtime heap objects.
+
+**Key Tasks**:
+
+1. Create `Literal` (or `ConstObject`) enum mirroring the current `Object` variants needed by parser/prepare.
+2. Update `Expr::Constant` and prepare-time evaluation to traffic in `Literal` values only.
+3. Provide conversion helpers (`Literal::to_runtime(&mut Heap) -> Object`) so compile-time constants can be materialized on demand once execution begins.
+4. Add concise rustdoc/docstrings to all helper methods clarifying whether they operate on literals or runtime objects.
+
+### Phase 0.5: Disable Fragile Parse-Time Optimizations
+
+**Goal**: Ensure only heap-backed runtime objects are evaluated/executed; remove constant-folding passes that rely on cloning full runtime `Object` graphs.
+
+**Key Tasks**:
+
+1. In `prepare.rs`, gate or remove `can_be_const` logic that attempts to partially evaluate expressions using runtime semantics.
+2. Replace it with a literal-only pass (safe operations like combining literal ints/strings) or defer entirely until after heap migration is complete.
+3. Document (with TODO comments) any temporarily-disabled optimizations so they can be revisited once the literal/runtime split settles.
+
 ### Phase 1: Core Heap Infrastructure (Foundation)
 
 **Goal**: Basic heap allocation with reference counting
