@@ -1,4 +1,3 @@
-use crate::exceptions::Exception;
 use crate::object::Object;
 
 /// Unique identifier for objects stored inside the heap arena.
@@ -11,7 +10,7 @@ pub enum HeapData {
     Bytes(Vec<u8>),
     List(Vec<Object>),
     Tuple(Vec<Object>),
-    Exception(Exception),
+    // TODO: classes
 }
 
 /// A single entry inside the heap arena, storing refcount and payload.
@@ -126,10 +125,6 @@ fn enqueue_children(data: &HeapData, stack: &mut Vec<ObjectId>) {
                     stack.push(*id);
                 }
             }
-        }
-        HeapData::Exception(_exc) => {
-            // Exceptions currently don't contain nested objects
-            // If this changes in the future, add enumeration logic here
         }
         HeapData::Str(_) | HeapData::Bytes(_) => {
             // Strings and bytes don't contain nested objects

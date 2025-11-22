@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 
 use ahash::AHashMap;
 
-use crate::exceptions::{internal_err, ExcType, Exception, ExceptionRaise};
+use crate::exceptions::{internal_err, ExcType, ExceptionRaise, SimpleException};
 use crate::expressions::{Expr, ExprLoc, Function, Identifier, Kwarg, Node};
 use crate::literal::Literal;
 use crate::object_types::Types;
@@ -151,7 +151,7 @@ impl Prepare {
             } => {
                 let (object, is_new) = self.get_id(object);
                 if is_new {
-                    let exc: ExceptionRaise = Exception::new(object.name, ExcType::NameError).into();
+                    let exc: ExceptionRaise = SimpleException::new(ExcType::NameError, Some(object.name.into())).into();
                     return Err(exc.into());
                 }
                 let (args, kwargs) = self.get_args_kwargs(args, kwargs)?;

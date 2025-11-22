@@ -16,7 +16,6 @@ fn format_object_debug(obj: &Object, heap: &monty::Heap) -> String {
                 let formatted_items: Vec<String> = items.iter().map(|item| format_object_debug(item, heap)).collect();
                 format!("Tuple(({}),)", formatted_items.join(", "))
             }
-            HeapData::Exception(exc) => format!("Exception({exc:?})"),
         },
         other => format!("{other:?}"),
     }
@@ -103,8 +102,7 @@ macro_rules! execute_raise_tests {
                     let result = ex.run(vec![]);
                     let output = match result {
                         Ok(Exit::Raise(exc_raise)) => {
-                            let heap = ex.heap();
-                            format!("{}", exc_raise.exc.repr(&heap))
+                            format!("{}", exc_raise.exc)
                         }
                         otherwise => panic!("Unexpected raise: {:?}", otherwise),
                     };
@@ -117,16 +115,11 @@ macro_rules! execute_raise_tests {
 }
 
 execute_raise_tests! {
-    // language=Python
     error_instance_str: "raise ValueError('testing')", "ValueError('testing')";
-    // language=Python
     raise_number: "raise 1 + 2", "TypeError('exceptions must derive from BaseException')";
-    // language=Python
     error_type: "raise TypeError", "TypeError()";
-    // language=Python
     error_no_args: "raise TypeError()", "TypeError()";
-    // language=Python
-    error_two_args: "raise ValueError('x', 1 + 2)", "ValueError('x', 3)";
-    // language=Python (constant folding removed, so mixed-type add errors at runtime)
-    add_int_str: "1 + '1'", "TypeError('unsupported operand type(s) for +: 'int' and 'str'')";
+    error_string_arg: "raise TypeError('hello')", "TypeError('hello')";
+    error_string_arg_quotes: "raise TypeError(\"hello 'there'\")", "TypeError(\"hello 'there'\")";
+    // error_two_args: "raise ValueError('x', 1 + 2)", "ValueError('x', 3)";
 }

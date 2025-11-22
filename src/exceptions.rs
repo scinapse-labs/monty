@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use crate::expressions::ExprLoc;
-use crate::heap::Heap;
-use crate::object::Object;
+use crate::object::{string_repr, Object};
 use crate::parse::CodeRange;
 use crate::run::RunResult;
 
@@ -35,72 +34,32 @@ impl ExcType {
     }
 }
 
+/// Simple lightweight representation of an exception.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Exception {
+pub struct SimpleException {
     exc_type: ExcType,
-    args: Vec<Object>,
+    arg: Option<Cow<'static, str>>,
 }
 
-impl fmt::Display for Exception {
+impl fmt::Display for SimpleException {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Note: Display trait doesn't have heap access, so Ref objects show as <Ref(id)>
-        // For proper formatting, use repr(heap) method instead
-        // different output for no args, 1 arg, and more than 1 args
-        let mut args_iter = self.args.iter();
-        if let Some(first_arg) = args_iter.next() {
-            if let Some(second_arg) = args_iter.next() {
-                // more than one arg, print as tuple
-                write!(f, "({first_arg}, {second_arg}")?;
-                for arg in args_iter {
-                    write!(f, ", {arg}")?;
-                }
-                write!(f, ")")
-            } else {
-                // one arg, simply return it
-                write!(f, "{first_arg}")
-            }
-        } else {
-            // no args, nothing is printed
-            Ok(())
+        write!(f, "{}(", self.exc_type.str())?;
+
+        if let Some(arg) = &self.arg {
+            write!(f, "{}", string_repr(arg))?;
         }
+
+        write!(f, ")")
     }
 }
 
-impl Exception {
-    pub(crate) fn new(s: String, exc_type: ExcType) -> Self {
-        Exception {
-            exc_type,
-            args: vec![Object::Str(s)],
-        }
-    }
-
-    pub(crate) fn call(args: Vec<Object>, exc_type: ExcType) -> Self {
-        Exception { exc_type, args }
-    }
-
-    pub(crate) fn str_with_type(&self) -> String {
-        format!("{}: {self}", self.exc_type)
+impl SimpleException {
+    pub(crate) fn new(exc_type: ExcType, arg: Option<Cow<'static, str>>) -> Self {
+        SimpleException { exc_type, arg }
     }
 
     pub(crate) fn type_str(&self) -> &'static str {
         self.exc_type.str()
-    }
-
-    /// Returns a repr string for this exception with heap access for formatting arguments.
-    pub fn repr(&self, heap: &Heap) -> String {
-        let mut s = self.exc_type.to_string();
-        s.push('(');
-
-        let mut args_iter = self.args.iter();
-        if let Some(first) = args_iter.next() {
-            s.push_str(&first.repr(heap));
-            for arg in args_iter {
-                s.push_str(", ");
-                s.push_str(&arg.repr(heap));
-            }
-        }
-        s.push(')');
-        s
     }
 
     pub(crate) fn with_frame(self, frame: StackFrame) -> ExceptionRaise {
@@ -129,36 +88,44 @@ impl Exception {
         let right_type = right_object.type_str_with_heap(heap);
         let new_position = left.position.extend(&right.position);
         Err(
-            exc!(ExcType::TypeError; "unsupported operand type(s) for {op}: '{left_type}' and '{right_type}'")
+            exc_fmt!(ExcType::TypeError; "unsupported operand type(s) for {op}: '{left_type}' and '{right_type}'")
                 .with_position(new_position)
                 .into(),
         )
     }
 }
 
-macro_rules! exc {
-    ($error_type:expr; $msg:tt) => {
-        crate::exceptions::Exception::new(format!($msg), $error_type)
-    };
-    ($error_type:expr; $msg:tt, $( $msg_args:expr ),+ ) => {
-        crate::exceptions::Exception::new(format!($msg, $( $msg_args ),+), $error_type)
+macro_rules! exc_static {
+    ($error_type:expr; $msg:expr) => {
+        crate::exceptions::SimpleException::new($error_type, Some($msg.into()))
     };
 }
-pub(crate) use exc;
+pub(crate) use exc_static;
 
-macro_rules! exc_err {
-    ($error_type:expr; $msg:tt) => {
-        Err(crate::exceptions::exc!($error_type; $msg).into())
-    };
-    ($error_type:expr; $msg:tt, $( $msg_args:expr ),+ ) => {
-        Err(crate::exceptions::exc!($error_type; $msg, $( $msg_args ),+).into())
+macro_rules! exc_fmt {
+    ($error_type:expr; $($fmt_args:tt)*) => {
+        crate::exceptions::SimpleException::new($error_type, Some(format!($($fmt_args)*).into()))
     };
 }
-pub(crate) use exc_err;
+pub(crate) use exc_fmt;
+
+macro_rules! exc_err_static {
+    ($error_type:expr; $msg:expr) => {
+        Err(crate::exceptions::exc_static!($error_type; $msg).into())
+    };
+}
+pub(crate) use exc_err_static;
+
+macro_rules! exc_err_fmt {
+    ($error_type:expr; $($fmt_args:tt)*) => {
+        Err(crate::exceptions::exc_fmt!($error_type; $($fmt_args)*).into())
+    };
+}
+pub(crate) use exc_err_fmt;
 
 #[derive(Debug, Clone)]
 pub struct ExceptionRaise<'c> {
-    pub exc: Exception,
+    pub exc: SimpleException,
     // first in vec is closes "bottom" frame
     pub(crate) frame: Option<StackFrame<'c>>,
 }
@@ -169,23 +136,22 @@ impl fmt::Display for ExceptionRaise<'_> {
             writeln!(f, "Traceback (most recent call last):")?;
             write!(f, "{frame}")?;
         }
-        write!(f, "{}", self.exc.str_with_type())
+        write!(f, "{}", self.exc)
     }
 }
 
-impl From<Exception> for ExceptionRaise<'_> {
-    fn from(exc: Exception) -> Self {
+impl From<SimpleException> for ExceptionRaise<'_> {
+    fn from(exc: SimpleException) -> Self {
         ExceptionRaise { exc, frame: None }
     }
 }
 
 impl ExceptionRaise<'_> {
     pub(crate) fn summary(&self) -> String {
-        let exc = self.exc.str_with_type();
         if let Some(ref frame) = self.frame {
-            format!("({}) {exc}", frame.position)
+            format!("({}) {}", frame.position, self.exc)
         } else {
-            format!("(<no-tb>) {exc}")
+            format!("(<no-tb>) {}", self.exc)
         }
     }
 }
@@ -296,8 +262,8 @@ impl<'c> From<ExceptionRaise<'c>> for RunError<'c> {
     }
 }
 
-impl From<Exception> for RunError<'_> {
-    fn from(exc: Exception) -> Self {
+impl From<SimpleException> for RunError<'_> {
+    fn from(exc: SimpleException) -> Self {
         Self::Exc(exc.into())
     }
 }

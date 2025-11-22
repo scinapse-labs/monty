@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::exceptions::{exc_err, internal_err, ExcType, Exception, InternalRunError};
+use crate::exceptions::{exc_err_fmt, internal_err, ExcType, InternalRunError, SimpleException};
 use crate::heap::Heap;
 use crate::parse_error::{ParseError, ParseResult};
 use crate::run::RunResult;
-use crate::Object;
+use crate::{HeapData, Object};
 
 // TODO use strum
 #[derive(Debug, Clone)]
@@ -62,17 +62,30 @@ impl Types {
             }
             Self::BuiltinFunction(FunctionTypes::Len) => {
                 if args.len() != 1 {
-                    return exc_err!(ExcType::TypeError; "len() takes exactly exactly one argument ({} given)", args.len());
+                    return exc_err_fmt!(ExcType::TypeError; "len() takes exactly exactly one argument ({} given)", args.len());
                 }
                 let object = &args[0];
                 match object.len(heap) {
                     Some(len) => Ok(Cow::Owned(Object::Int(len as i64))),
-                    None => exc_err!(ExcType::TypeError; "Object of type {} has no len()", object),
+                    None => exc_err_fmt!(ExcType::TypeError; "Object of type {} has no len()", object),
                 }
             }
             Self::Exceptions(exc_type) => {
-                let args: Vec<Object> = args.into_iter().map(std::borrow::Cow::into_owned).collect();
-                Ok(Cow::Owned(Object::Exc(Exception::call(args, *exc_type))))
+                if let Some(first) = args.first() {
+                    if args.len() == 1 {
+                        if let Object::Ref(object_id) = first.as_ref() {
+                            if let HeapData::Str(s) = heap.get(*object_id) {
+                                return Ok(Cow::Owned(Object::Exc(SimpleException::new(
+                                    *exc_type,
+                                    Some(s.to_owned().into()),
+                                ))));
+                            }
+                        }
+                    }
+                    internal_err!(InternalRunError::TodoError; "Exceptions can only be called with zero or one string argument")
+                } else {
+                    Ok(Cow::Owned(Object::Exc(SimpleException::new(*exc_type, None))))
+                }
             }
             Self::Range => {
                 if args.len() == 1 {

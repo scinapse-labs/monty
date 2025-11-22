@@ -1,13 +1,12 @@
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::rc::Rc;
 
-use crate::exceptions::{internal_err, ExcType, Exception, InternalRunError};
+use crate::exceptions::{internal_err, ExcType, InternalRunError, SimpleException};
 use crate::expressions::{Expr, ExprLoc, Function, Identifier, Kwarg};
 use crate::heap::Heap;
 use crate::object::{Attr, Object};
 use crate::operators::{CmpOperator, Operator};
 use crate::run::RunResult;
+use crate::HeapData;
 
 /// Evaluates an expression node and returns a value backed by the shared heap.
 ///
@@ -29,7 +28,7 @@ pub(crate) fn evaluate<'c, 'd>(
             } else {
                 let name = ident.name.clone();
 
-                Err(Exception::new(name, ExcType::NameError)
+                Err(SimpleException::new(ExcType::NameError, Some(name.into()))
                     .with_position(expr_loc.position)
                     .into())
             }
@@ -49,7 +48,8 @@ pub(crate) fn evaluate<'c, 'd>(
                 .iter()
                 .map(|e| evaluate(namespace, heap, e).map(std::borrow::Cow::into_owned))
                 .collect::<RunResult<_>>()?;
-            Ok(Cow::Owned(Object::List(Rc::new(RefCell::new(objects)))))
+            let object_id = heap.allocate(HeapData::List(objects));
+            Ok(Cow::Owned(Object::Ref(object_id)))
         }
     }
 }
@@ -86,7 +86,14 @@ fn eval_op<'c, 'd>(
     };
     match op_object {
         Some(object) => Ok(Cow::Owned(object)),
-        None => Exception::operand_type_error(left, op, right, Cow::Owned(left_object), Cow::Owned(right_object), heap),
+        None => SimpleException::operand_type_error(
+            left,
+            op,
+            right,
+            Cow::Owned(left_object),
+            Cow::Owned(right_object),
+            heap,
+        ),
     }
 }
 
@@ -111,7 +118,7 @@ fn cmp_op<'c, 'd>(
         CmpOperator::LtE => Ok(left_cow.le(&right_cow)),
         CmpOperator::ModEq(v) => match left_cow.as_ref().modulus_eq(&right_object, *v) {
             Some(b) => Ok(b),
-            None => Exception::operand_type_error(left, Operator::Mod, right, left_cow, right_cow, heap),
+            None => SimpleException::operand_type_error(left, Operator::Mod, right, left_cow, right_cow, heap),
         },
         _ => internal_err!(InternalRunError::TodoError; "Operator {op:?} not yet implemented"),
     }
@@ -162,7 +169,7 @@ fn attr_call<'c, 'd>(
     } else {
         let name = object_ident.name.clone();
 
-        return Err(Exception::new(name, ExcType::NameError)
+        return Err(SimpleException::new(ExcType::NameError, Some(name.into()))
             .with_position(expr_loc.position)
             .into());
     };

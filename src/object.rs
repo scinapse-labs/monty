@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::rc::Rc;
 
-use crate::exceptions::{exc_err, ExcType, Exception};
+use crate::exceptions::{exc_err_fmt, ExcType, SimpleException};
 use crate::heap::{Heap, ObjectId};
 use crate::run::RunResult;
 use crate::{ParseError, ParseResult};
@@ -29,16 +29,10 @@ pub enum Object {
     Int(i64),
     Float(f64),
     Range(i64),
+    Exc(SimpleException),
 
     // Heap-allocated values (stored in arena)
     Ref(ObjectId),
-
-    // TODO: Remove these variants once migration is complete - they should all become Ref
-    Bytes(Vec<u8>),
-    Str(String),
-    List(Rc<RefCell<Vec<Object>>>),
-    Tuple(Vec<Object>),
-    Exc(Exception),
 }
 
 impl fmt::Display for Object {
@@ -52,17 +46,13 @@ impl fmt::Display for Object {
             Self::Int(v) => write!(f, "{v}"),
             Self::Float(v) => write!(f, "{v}"),
             Self::Range(size) => write!(f, "0:{size}"),
+            Self::Exc(exc) => write!(f, "{exc}"),
             Self::Ref(id) => write!(f, "<Ref({id})>"),
-            // Legacy variants - will be removed
-            Self::Str(v) => write!(f, "{v}"),
-            Self::Bytes(v) => write!(f, "{v:?}"), // TODO: format bytes
-            Self::List(v) => format_list_display(v, f),
-            Self::Tuple(v) => format_iterable('(', ')', v, f),
-            Self::Exc(exc) => write!(f, "0:{exc}"),
         }
     }
 }
 
+// TODO move all these below Object impl
 fn format_iterable(start: char, end: char, items: &[Object], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{start}")?;
     let mut items_iter = items.iter();
@@ -135,10 +125,6 @@ impl PartialOrd for Object {
             (Self::False, _) => Self::Int(0).partial_cmp(other),
             (_, Self::True) => self.partial_cmp(&Self::Int(1)),
             (_, Self::False) => self.partial_cmp(&Self::Int(0)),
-            (Self::Str(s), Self::Str(o)) => s.partial_cmp(o),
-            (Self::Bytes(s), Self::Bytes(o)) => s.partial_cmp(o),
-            (Self::List(s), Self::List(o)) => s.borrow().partial_cmp(&o.borrow()),
-            (Self::Tuple(s), Self::Tuple(o)) => s.partial_cmp(o),
             // Ref comparison requires heap context, not supported in PartialOrd
             (Self::Ref(_), Self::Ref(_)) => None,
             _ => None,
@@ -196,14 +182,6 @@ impl Object {
                 }
             }
 
-            // Legacy variant support (will be removed once migration is complete)
-            (Self::Str(v1), Self::Str(v2)) => Some(Self::Str(format!("{v1}{v2}"))),
-            (Self::List(v1), Self::List(v2)) => {
-                let mut data = v1.borrow().clone();
-                data.extend(v2.borrow().iter().cloned());
-                Some(Self::List(Rc::new(RefCell::new(data))))
-            }
-
             _ => None,
         }
     }
@@ -257,14 +235,6 @@ impl Object {
                 }
             }
 
-            // Legacy variant support
-            (Self::Str(v1), Self::Str(v2)) => {
-                v1.push_str(&v2);
-            }
-            (Self::List(v1), Self::List(v2)) => {
-                v1.borrow_mut().extend(v2.borrow().iter().cloned());
-            }
-
             (_, other) => return Err(other),
         }
         Ok(())
@@ -285,9 +255,6 @@ impl Object {
             (Self::Undefined, _) => false,
             (_, Self::Undefined) => false,
             (Self::Int(v1), Self::Int(v2)) => v1 == v2,
-            (Self::Str(v1), Self::Str(v2)) => v1 == v2,
-            (Self::List(v1), Self::List(v2)) => vecs_equal(&v1.borrow(), &v2.borrow()),
-            (Self::Tuple(v1), Self::Tuple(v2)) => vecs_equal(v1, v2),
             (Self::Range(v1), Self::Range(v2)) => v1 == v2,
             (Self::True, Self::True) => true,
             (Self::True, Self::Int(v2)) => 1 == *v2,
@@ -309,13 +276,6 @@ impl Object {
         use crate::heap::HeapData;
 
         match self {
-            Self::Ref(id) => match heap.get(*id) {
-                HeapData::Str(s) => !s.is_empty(),
-                HeapData::Bytes(b) => !b.is_empty(),
-                HeapData::List(items) => !items.is_empty(),
-                HeapData::Tuple(items) => !items.is_empty(),
-                HeapData::Exception(_) => true,
-            },
             // Immediate values
             Self::Undefined => false,
             Self::Ellipsis => true,
@@ -325,12 +285,13 @@ impl Object {
             Self::Int(v) => *v != 0,
             Self::Float(f) => *f != 0.0,
             Self::Range(v) => *v != 0,
-            // Legacy variants - will be removed
-            Self::Str(v) => !v.is_empty(),
-            Self::Bytes(v) => !v.is_empty(),
-            Self::List(v) => !v.borrow().is_empty(),
-            Self::Tuple(v) => !v.is_empty(),
             Self::Exc(_) => true,
+            Self::Ref(id) => match heap.get(*id) {
+                HeapData::Str(s) => !s.is_empty(),
+                HeapData::Bytes(b) => !b.is_empty(),
+                HeapData::List(items) => !items.is_empty(),
+                HeapData::Tuple(items) => !items.is_empty(),
+            },
         }
     }
 
@@ -371,13 +332,7 @@ impl Object {
                 HeapData::Bytes(b) => Some(b.len()),
                 HeapData::List(items) => Some(items.len()),
                 HeapData::Tuple(items) => Some(items.len()),
-                HeapData::Exception(_) => None,
             },
-            // Legacy variants - will be removed
-            Self::Str(v) => Some(v.len()),
-            Self::Bytes(v) => Some(v.len()),
-            Self::List(v) => Some(v.borrow().len()),
-            Self::Tuple(v) => Some(v.len()),
             _ => None,
         }
     }
@@ -392,17 +347,11 @@ impl Object {
 
         match self {
             Self::Ref(id) => match heap.get(*id) {
-                HeapData::Str(s) => format!("'{s}'"),
+                HeapData::Str(s) => string_repr(s),
                 HeapData::Bytes(b) => format!("b'{b:?}'"),
                 HeapData::List(items) => format_heap_list_repr(items, heap),
                 HeapData::Tuple(items) => format_heap_tuple_repr(items, heap),
-                HeapData::Exception(exc) => exc.repr(heap),
             },
-            // Legacy variants - will be removed
-            Self::Str(v) => format!("'{v}'"),
-            Self::Bytes(v) => format!("b'{v:?}'"),
-            Self::List(v) => format_list_repr(v),
-            Self::Exc(exc) => exc.repr(heap),
             _ => self.to_string(),
         }
     }
@@ -412,7 +361,7 @@ impl Object {
         match self {
             Self::Int(i) => Ok(*i),
             // TODO use self.type
-            _ => exc_err!(ExcType::TypeError; "'{self:?}' object cannot be interpreted as an integer"),
+            _ => exc_err_fmt!(ExcType::TypeError; "'{self:?}' object cannot be interpreted as an integer"),
         }
     }
 
@@ -435,13 +384,8 @@ impl Object {
             Self::Int(_) => "int",
             Self::Float(_) => "float",
             Self::Range(_) => "range",
-            Self::Ref(_) => panic!("Object::type_str() on Ref requires heap context - use type_str_with_heap()"),
-            // Legacy variants - will be removed
-            Self::Str(_) => "str",
-            Self::Bytes(_) => "bytes",
-            Self::List(_) => "list",
-            Self::Tuple(_) => "tuple",
             Self::Exc(e) => e.type_str(),
+            Self::Ref(_) => panic!("Object::type_str() on Ref requires heap context - use type_str_with_heap()"),
         }
     }
 
@@ -456,7 +400,6 @@ impl Object {
                 HeapData::Bytes(_) => "bytes",
                 HeapData::List(_) => "list",
                 HeapData::Tuple(_) => "tuple",
-                HeapData::Exception(e) => e.type_str(),
             },
             other => other.type_str(),
         }
@@ -475,26 +418,6 @@ impl Object {
         use crate::heap::HeapData;
 
         match (self, attr) {
-            // Legacy list variant support
-            (Self::List(v), Attr::Foobar) => Ok(Cow::Owned(Object::Int(v.borrow().len() as i64))),
-            (Self::List(v), Attr::Append) => {
-                if args.len() == 1 {
-                    v.borrow_mut().push(args[0].clone().into_owned());
-                    Ok(Cow::Owned(Self::None))
-                } else {
-                    exc_err!(ExcType::TypeError; "{attr} takes exactly exactly one argument ({} given)", args.len())
-                }
-            }
-            (Self::List(v), Attr::Insert) => {
-                if args.len() == 2 {
-                    let index = args[0].as_int()? as usize;
-                    v.borrow_mut().insert(index, args[1].clone().into_owned());
-                    Ok(Cow::Owned(Self::None))
-                } else {
-                    exc_err!(ExcType::TypeError; "{attr} expected 2 arguments, got {}", args.len())
-                }
-            }
-
             // Heap-allocated list support
             (Self::Ref(id), Attr::Append) => {
                 let obj_id = *id; // Copy the ID to avoid borrow issues
@@ -515,11 +438,11 @@ impl Object {
                         }
                         Ok(Cow::Owned(Self::None))
                     } else {
-                        exc_err!(ExcType::TypeError; "{attr} takes exactly exactly one argument ({} given)", args.len())
+                        exc_err_fmt!(ExcType::TypeError; "{attr} takes exactly exactly one argument ({} given)", args.len())
                     }
                 } else {
                     let type_str = Self::Ref(obj_id).type_str_with_heap(heap);
-                    exc_err!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
+                    exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
             (Self::Ref(id), Attr::Insert) => {
@@ -542,11 +465,11 @@ impl Object {
                         }
                         Ok(Cow::Owned(Self::None))
                     } else {
-                        exc_err!(ExcType::TypeError; "{attr} expected 2 arguments, got {}", args.len())
+                        exc_err_fmt!(ExcType::TypeError; "{attr} expected 2 arguments, got {}", args.len())
                     }
                 } else {
                     let type_str = Self::Ref(obj_id).type_str_with_heap(heap);
-                    exc_err!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
+                    exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
             (Self::Ref(id), Attr::Foobar) => {
@@ -555,13 +478,13 @@ impl Object {
                     Ok(Cow::Owned(Object::Int(list.len() as i64)))
                 } else {
                     let type_str = Self::Ref(id).type_str_with_heap(heap);
-                    exc_err!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
+                    exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
 
             (s, _) => {
                 let type_str = s.type_str_with_heap(heap);
-                exc_err!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
+                exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
             }
         }
     }
@@ -617,13 +540,8 @@ impl Object {
             Self::Int(v) => Self::Int(*v),
             Self::Float(v) => Self::Float(*v),
             Self::Range(v) => Self::Range(*v),
-            Self::Ref(_) => unreachable!("Ref clones must go through clone_with_heap to maintain refcounts"),
-            // Legacy variants - will be removed in later steps
-            Self::Str(s) => Self::Str(s.clone()),
-            Self::Bytes(b) => Self::Bytes(b.clone()),
-            Self::List(l) => Self::List(Rc::clone(l)),
-            Self::Tuple(t) => Self::Tuple(t.clone()),
             Self::Exc(e) => Self::Exc(e.clone()),
+            Self::Ref(_) => unreachable!("Ref clones must go through clone_with_heap to maintain refcounts"),
         }
     }
 }
@@ -668,5 +586,25 @@ impl Attr {
             "foobar" => Ok(Self::Foobar),
             _ => Err(ParseError::Internal(format!("unknown attribute: `{name}`").into())),
         }
+    }
+}
+
+macro_rules! string_replace_common {
+    ($s:expr) => {
+        $s.replace('\\', "\\\\")
+            .replace('\n', "\\n")
+            .replace('\t', "\\t")
+            .replace('\r', "\\r")
+    };
+}
+
+pub(crate) fn string_repr(s: &str) -> String {
+    // Check if the string contains single quotes but not double quotes
+    if s.contains('\'') && !s.contains('"') {
+        // Use double quotes if string contains only single quotes
+        format!("\"{}\"", string_replace_common!(s))
+    } else {
+        // Use single quotes by default, escape any single quotes in the string
+        format!("'{}'", string_replace_common!(s.replace('\'', "\\'")))
     }
 }

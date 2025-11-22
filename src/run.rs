@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
 use crate::evaluate::{evaluate, evaluate_bool};
-use crate::exceptions::{exc, exc_err, internal_err, ExcType, Exception, InternalRunError, RunError, StackFrame};
+use crate::exceptions::{
+    exc_err_static, exc_fmt, internal_err, ExcType, InternalRunError, RunError, SimpleException, StackFrame,
+};
 use crate::expressions::{Exit, ExprLoc, Identifier, Node};
 use crate::heap::Heap;
 use crate::object::Object;
@@ -87,7 +89,7 @@ impl<'c> RunFrame<'c> {
             let object = self.execute_expr(heap, exc_expr)?;
             match object.into_owned() {
                 Object::Exc(exc) => Err(exc.with_frame(self.stack_frame(&exc_expr.position)).into()),
-                _ => exc_err!(ExcType::TypeError; "exceptions must derive from BaseException"),
+                _ => exc_err_static!(ExcType::TypeError; "exceptions must derive from BaseException"),
             }
         } else {
             internal_err!(InternalRunError::TodoError; "plain raise not yet supported")
@@ -116,13 +118,13 @@ impl<'c> RunFrame<'c> {
             if let Err(right) = r {
                 let target_type = target_object.to_string();
                 let right_type = right.to_string();
-                let e = exc!(ExcType::TypeError; "unsupported operand type(s) for {op}: '{target_type}' and '{right_type}'");
+                let e = exc_fmt!(ExcType::TypeError; "unsupported operand type(s) for {op}: '{target_type}' and '{right_type}'");
                 Err(e.with_frame(self.stack_frame(&expr.position)).into())
             } else {
                 Ok(())
             }
         } else {
-            let e = Exception::new(target.name.to_string(), ExcType::NameError);
+            let e = SimpleException::new(ExcType::NameError, Some(target.name.to_string().into()));
             Err(e.with_frame(self.stack_frame(&target.position)).into())
         }
     }
