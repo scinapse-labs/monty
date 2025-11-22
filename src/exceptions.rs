@@ -84,8 +84,8 @@ impl SimpleException {
         right_object: Cow<'d, Object>,
         heap: &crate::heap::Heap,
     ) -> RunResult<'c, T> {
-        let left_type = left_object.type_str_with_heap(heap);
-        let right_type = right_object.type_str_with_heap(heap);
+        let left_type = left_object.type_str(heap);
+        let right_type = right_object.type_str(heap);
         let new_position = left.position.extend(&right.position);
         Err(
             exc_fmt!(ExcType::TypeError; "unsupported operand type(s) for {op}: '{left_type}' and '{right_type}'")

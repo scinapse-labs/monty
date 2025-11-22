@@ -306,13 +306,9 @@ impl Object {
     /// Returns the Python type name for this object.
     ///
     /// For heap-allocated objects (Ref variant), this method requires heap access
-    /// to determine the type. Use `type_str_with_heap()` instead when working with
-    /// potentially heap-allocated objects.
-    ///
-    /// # Panics
-    /// Panics if called on a Ref variant without using `type_str_with_heap()`.
+    /// to determine the type.
     #[must_use]
-    pub fn type_str(&self) -> &'static str {
+    pub fn type_str(&self, heap: &Heap) -> &'static str {
         match self {
             Self::Undefined => "undefined",
             Self::Ellipsis => "ellipsis",
@@ -323,23 +319,7 @@ impl Object {
             Self::Float(_) => "float",
             Self::Range(_) => "range",
             Self::Exc(e) => e.type_str(),
-            Self::Ref(_) => panic!("Object::type_str() on Ref requires heap context - use type_str_with_heap()"),
-        }
-    }
-
-    /// Returns the Python type name for this object, with heap access for Ref variants.
-    #[must_use]
-    pub fn type_str_with_heap(&self, heap: &Heap) -> &'static str {
-        use crate::heap::HeapData;
-
-        match self {
-            Self::Ref(id) => match heap.get(*id) {
-                HeapData::Str(_) => "str",
-                HeapData::Bytes(_) => "bytes",
-                HeapData::List(_) => "list",
-                HeapData::Tuple(_) => "tuple",
-            },
-            other => other.type_str(),
+            Self::Ref(id) => heap.get(*id).type_str(),
         }
     }
 
@@ -379,7 +359,7 @@ impl Object {
                         exc_err_fmt!(ExcType::TypeError; "{attr} takes exactly exactly one argument ({} given)", args.len())
                     }
                 } else {
-                    let type_str = Self::Ref(obj_id).type_str_with_heap(heap);
+                    let type_str = Self::Ref(obj_id).type_str(heap);
                     exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
@@ -406,7 +386,7 @@ impl Object {
                         exc_err_fmt!(ExcType::TypeError; "{attr} expected 2 arguments, got {}", args.len())
                     }
                 } else {
-                    let type_str = Self::Ref(obj_id).type_str_with_heap(heap);
+                    let type_str = Self::Ref(obj_id).type_str(heap);
                     exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
@@ -415,13 +395,13 @@ impl Object {
                 if let HeapData::List(list) = heap.get(id) {
                     Ok(Cow::Owned(Object::Int(list.len() as i64)))
                 } else {
-                    let type_str = Self::Ref(id).type_str_with_heap(heap);
+                    let type_str = Self::Ref(id).type_str(heap);
                     exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
                 }
             }
 
             (s, _) => {
-                let type_str = s.type_str_with_heap(heap);
+                let type_str = s.type_str(heap);
                 exc_err_fmt!(ExcType::AttributeError; "'{}' object has no attribute '{attr}'", type_str)
             }
         }

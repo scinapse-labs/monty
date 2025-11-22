@@ -2,23 +2,7 @@ use monty::{Executor, Exit, Object};
 
 /// Formats an Object for debug output, following heap references to show actual values
 fn format_object_debug(obj: &Object, heap: &monty::Heap) -> String {
-    use monty::HeapData;
-
-    match obj {
-        Object::Ref(id) => match heap.get(*id) {
-            HeapData::Str(s) => format!("Str({s:?})"),
-            HeapData::Bytes(b) => format!("Bytes({b:?})"),
-            HeapData::List(items) => {
-                let formatted_items: Vec<String> = items.iter().map(|item| format_object_debug(item, heap)).collect();
-                format!("List([{}])", formatted_items.join(", "))
-            }
-            HeapData::Tuple(items) => {
-                let formatted_items: Vec<String> = items.iter().map(|item| format_object_debug(item, heap)).collect();
-                format!("Tuple(({}),)", formatted_items.join(", "))
-            }
-        },
-        other => format!("{other:?}"),
-    }
+    format!("{}: {}", obj.type_str(heap), obj.repr(heap))
 }
 
 macro_rules! parse_error_tests {
@@ -65,36 +49,37 @@ macro_rules! execute_ok_tests {
 }
 
 execute_ok_tests! {
-    add_ints: "1 + 1", "Int(2)";
-    add_strs: "'a' + 'b'", r#"Str("ab")"#;
+    add_ints: "1 + 1", "int: 2";
+    add_strs: "'a' + 'b'", "str: 'ab'";
     for_loop_str_append_assign_op: "
 v = ''
 for i in range(1000):
     if i % 13 == 0:
         v += 'x'
 len(v)
-", "Int(77)";
+", "int: 77";
     for_loop_str_append_assign: "
 v = ''
 for i in range(1000):
     if i % 13 == 0:
         v = v + 'x'
 len(v)
-", "Int(77)";
+", "int: 77";
     shared_list_append: "
 a = [1]
 b = a
 b.append(2)
 len(a)
-", "Int(2)";
+", "int: 2";
     list_repr: "
 a = [1, 2, 3]
 repr(a)
-", "Str(\"[1, 2, 3]\")";
+", "str: '[1, 2, 3]'";
 list_str: "
 a = [1, 2, 3]
 str(a)
-", "Str(\"[1, 2, 3]\")";
+", "str: '[1, 2, 3]'";
+ints_equal: "(1 == 1, 1 == 2)", "tuple: (True, False)";
 }
 
 macro_rules! execute_raise_tests {

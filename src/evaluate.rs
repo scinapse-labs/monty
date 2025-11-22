@@ -51,6 +51,14 @@ pub(crate) fn evaluate<'c, 'd>(
             let object_id = heap.allocate(HeapData::List(objects));
             Ok(Cow::Owned(Object::Ref(object_id)))
         }
+        Expr::Tuple(elements) => {
+            let objects = elements
+                .iter()
+                .map(|e| evaluate(namespace, heap, e).map(std::borrow::Cow::into_owned))
+                .collect::<RunResult<_>>()?;
+            let object_id = heap.allocate(HeapData::Tuple(objects));
+            Ok(Cow::Owned(Object::Ref(object_id)))
+        }
     }
 }
 

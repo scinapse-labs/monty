@@ -13,6 +13,19 @@ pub enum HeapData {
     // TODO: support arbitrary classes
 }
 
+impl HeapData {
+    /// Debug representation of the data type
+    #[must_use]
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            Self::Str(_) => "str",
+            Self::Bytes(_) => "bytes",
+            Self::List(_) => "list",
+            Self::Tuple(_) => "tuple",
+        }
+    }
+}
+
 /// A single entry inside the heap arena, storing refcount and payload.
 #[derive(Debug)]
 struct HeapObject {

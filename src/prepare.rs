@@ -169,6 +169,13 @@ impl Prepare {
                     .collect::<ParseResult<_>>()?;
                 Expr::List(expressions)
             }
+            Expr::Tuple(elements) => {
+                let expressions = elements
+                    .into_iter()
+                    .map(|e| self.prepare_expression(e))
+                    .collect::<ParseResult<_>>()?;
+                Expr::Tuple(expressions)
+            }
         };
 
         if let Expr::CmpOp { left, op, right } = &expr {

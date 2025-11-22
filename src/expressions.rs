@@ -68,8 +68,8 @@ pub(crate) enum Expr<'c> {
         op: CmpOperator,
         right: Box<ExprLoc<'c>>,
     },
-    #[allow(dead_code)]
     List(Vec<ExprLoc<'c>>),
+    Tuple(Vec<ExprLoc<'c>>),
 }
 
 impl fmt::Display for Expr<'_> {
@@ -90,11 +90,22 @@ impl fmt::Display for Expr<'_> {
             Self::Op { left, op, right } => write!(f, "{left} {op} {right}"),
             Self::CmpOp { left, op, right } => write!(f, "{left} {op} {right}"),
             Self::List(list) => {
-                write!(f, "[")?;
-                for item in list {
-                    write!(f, "{item}, ")?;
-                }
-                write!(f, "]")
+                write!(
+                    f,
+                    "[{}]",
+                    list.iter().map(ToString::to_string).collect::<Vec<String>>().join(", ")
+                )
+            }
+            Self::Tuple(tuple) => {
+                write!(
+                    f,
+                    "({})",
+                    tuple
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
             }
         }
     }
