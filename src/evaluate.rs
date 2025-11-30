@@ -1,5 +1,6 @@
+use crate::args::Args;
 use crate::exceptions::{internal_err, ExcType, InternalRunError, SimpleException};
-use crate::expressions::{Callable, Expr, ExprLoc, Identifier, Kwarg};
+use crate::expressions::{ArgsExpr, Callable, Expr, ExprLoc, Identifier};
 use crate::heap::Heap;
 use crate::object::{Attr, Object};
 use crate::operators::{CmpOperator, Operator};
@@ -32,13 +33,8 @@ pub(crate) fn evaluate_use<'c, 'd>(
                     .into())
             }
         }
-        Expr::Call { callable, args, kwargs } => Ok(call_function(namespace, heap, callable, args, kwargs)?),
-        Expr::AttrCall {
-            object,
-            attr,
-            args,
-            kwargs,
-        } => Ok(attr_call(namespace, heap, expr_loc, object, attr, args, kwargs)?),
+        Expr::Call { callable, args } => Ok(call_function(namespace, heap, callable, args)?),
+        Expr::AttrCall { object, attr, args } => Ok(attr_call(namespace, heap, expr_loc, object, attr, args)?),
         Expr::Op { left, op, right } => eval_op(namespace, heap, left, op, right),
         Expr::CmpOp { left, op, right } => Ok(cmp_op(namespace, heap, left, op, right)?.into()),
         Expr::List(elements) => {
@@ -46,7 +42,7 @@ pub(crate) fn evaluate_use<'c, 'd>(
                 .iter()
                 .map(|e| evaluate_use(namespace, heap, e))
                 .collect::<RunResult<_>>()?;
-            let object_id = heap.allocate(HeapData::List(List::from_vec(objects)));
+            let object_id = heap.allocate(HeapData::List(List::new(objects)));
             Ok(Object::Ref(object_id))
         }
         Expr::Tuple(elements) => {
@@ -105,13 +101,8 @@ pub(crate) fn evaluate_discard<'c, 'd>(
                     .into())
             }
         }
-        Expr::Call { callable, args, kwargs } => call_function(namespace, heap, callable, args, kwargs).map(|_| ()),
-        Expr::AttrCall {
-            object,
-            attr,
-            args,
-            kwargs,
-        } => attr_call(namespace, heap, expr_loc, object, attr, args, kwargs).map(|_| ()),
+        Expr::Call { callable, args } => call_function(namespace, heap, callable, args).map(|_| ()),
+        Expr::AttrCall { object, attr, args } => attr_call(namespace, heap, expr_loc, object, attr, args).map(|_| ()),
         Expr::Op { left, op, right } => eval_op(namespace, heap, left, op, right).map(|_| ()),
         Expr::CmpOp { left, op, right } => cmp_op(namespace, heap, left, op, right).map(|_| ()),
         Expr::List(elements) => {
@@ -243,13 +234,9 @@ fn call_function<'c, 'd>(
     namespace: &'d mut [Object],
     heap: &'d mut Heap,
     callable: &'d Callable,
-    args: &'d [ExprLoc<'c>],
-    _kwargs: &'d [Kwarg],
+    args: &'d ArgsExpr<'c>,
 ) -> RunResult<'c, Object> {
-    let args = args
-        .iter()
-        .map(|a| evaluate_use(namespace, heap, a))
-        .collect::<RunResult<_>>()?;
+    let args = evaluate_args(namespace, heap, args)?;
     match callable {
         Callable::Builtin(builtin) => builtin.call(heap, args),
         Callable::Exception(exc_type) => call_exception(heap, args, *exc_type),
@@ -266,14 +253,10 @@ fn attr_call<'c, 'd>(
     expr_loc: &'d ExprLoc<'c>,
     object_ident: &Identifier<'c>,
     attr: &Attr,
-    args: &'d [ExprLoc<'c>],
-    _kwargs: &'d [Kwarg],
+    args: &'d ArgsExpr<'c>,
 ) -> RunResult<'c, Object> {
     // Evaluate arguments first to avoid borrow conflicts
-    let args: Vec<Object> = args
-        .iter()
-        .map(|a| evaluate_use(namespace, heap, a))
-        .collect::<RunResult<_>>()?;
+    let args = evaluate_args(namespace, heap, args)?;
 
     let object = if let Some(object) = namespace.get_mut(object_ident.id) {
         match object {
@@ -290,20 +273,42 @@ fn attr_call<'c, 'd>(
     object.call_attr(heap, attr, args)
 }
 
-fn call_exception<'c>(heap: &mut Heap, args: Vec<Object>, exc_type: ExcType) -> RunResult<'c, Object> {
-    if let Some(first) = args.first() {
-        if args.len() == 1 {
-            if let Object::Ref(object_id) = first {
-                if let HeapData::Str(s) = heap.get(*object_id) {
-                    return Ok(Object::Exc(SimpleException::new(
-                        exc_type,
-                        Some(s.as_str().to_owned().into()),
-                    )));
-                }
+fn call_exception<'c>(heap: &mut Heap, args: Args, exc_type: ExcType) -> RunResult<'c, Object> {
+    match args {
+        Args::Zero => return Ok(Object::Exc(SimpleException::new(exc_type, None))),
+        Args::One(Object::Ref(object_id)) => {
+            if let HeapData::Str(s) = heap.get(object_id) {
+                return Ok(Object::Exc(SimpleException::new(
+                    exc_type,
+                    Some(s.as_str().to_owned().into()),
+                )));
             }
         }
-        internal_err!(InternalRunError::TodoError; "Exceptions can only be called with zero or one string argument")
-    } else {
-        Ok(Object::Exc(SimpleException::new(exc_type, None)))
+        _ => {}
+    }
+    internal_err!(InternalRunError::TodoError; "Exceptions can only be called with zero or one string argument")
+}
+
+/// Evaluates function arguments into an Args, optimized for common argument counts.
+#[inline]
+fn evaluate_args<'c, 'd>(
+    namespace: &'d mut [Object],
+    heap: &'d mut Heap,
+    args_expr: &'d ArgsExpr<'c>,
+) -> RunResult<'c, Args> {
+    match args_expr {
+        ArgsExpr::Zero => Ok(Args::Zero),
+        ArgsExpr::One(arg) => evaluate_use(namespace, heap, arg).map(Args::One),
+        ArgsExpr::Two(arg1, arg2) => {
+            let arg0 = evaluate_use(namespace, heap, arg1)?;
+            let arg1 = evaluate_use(namespace, heap, arg2)?;
+            Ok(Args::Two(arg0, arg1))
+        }
+        ArgsExpr::Args(args) => args
+            .iter()
+            .map(|a| evaluate_use(namespace, heap, a))
+            .collect::<RunResult<_>>()
+            .map(Args::Many),
+        _ => todo!("Implement evaluation for kwargs"),
     }
 }

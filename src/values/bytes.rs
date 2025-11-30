@@ -5,6 +5,7 @@
 use std::borrow::Cow;
 use std::fmt::Write;
 
+use crate::args::Args;
 use crate::exceptions::ExcType;
 use crate::heap::{Heap, ObjectId};
 use crate::object::{Attr, Object};
@@ -109,7 +110,7 @@ impl PyValue for Bytes {
         Some(self.0.len())
     }
 
-    fn py_eq(&self, other: &Self, _heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, _heap: &mut Heap) -> bool {
         self.0 == other.0
     }
 
@@ -126,7 +127,7 @@ impl PyValue for Bytes {
         Cow::Owned(bytes_repr(&self.0))
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Args) -> RunResult<'c, Object> {
         Err(ExcType::attribute_error(self.py_type(heap), attr))
     }
 }

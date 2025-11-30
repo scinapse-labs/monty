@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use strum::Display;
 
+use crate::args::Args;
 use crate::exceptions::{exc_err_fmt, ExcType, SimpleException};
 use crate::heap::HeapData;
 use crate::heap::{Heap, ObjectId};
@@ -80,7 +81,7 @@ impl PyValue for Object {
         }
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
         match (self, other) {
             (Self::Undefined, _) => false,
             (_, Self::Undefined) => false,
@@ -90,7 +91,13 @@ impl PyValue for Object {
             (Self::Bool(v1), Self::Int(v2)) => i64::from(*v1) == *v2,
             (Self::Int(v1), Self::Bool(v2)) => *v1 == i64::from(*v2),
             (Self::None, Self::None) => true,
-            (Self::Ref(id1), Self::Ref(id2)) => (*id1 == *id2) || heap.get(*id1).py_eq(heap.get(*id2), heap),
+            (Self::Ref(id1), Self::Ref(id2)) => {
+                if *id1 == *id2 {
+                    return true;
+                }
+                // Need to use with_two for proper borrow management
+                heap.with_two(*id1, *id2, |heap, left, right| left.py_eq(right, heap))
+            }
             _ => false,
         }
     }
@@ -210,7 +217,7 @@ impl PyValue for Box<Object> {
         self.as_ref().py_len(heap)
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
         self.as_ref().py_eq(other, heap)
     }
 
@@ -250,7 +257,7 @@ impl PyValue for Box<Object> {
         PyValue::py_iadd(self.as_mut(), other, heap, self_id)
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         self.as_mut().py_call_attr(heap, attr, args)
     }
 }
@@ -304,9 +311,9 @@ impl Object {
     /// Returns Some(hash) for hashable types (immediate values and immutable heap types).
     /// Returns None for unhashable types (list, dict).
     ///
-    /// For heap-allocated objects (Ref variant), this retrieves the precomputed
-    /// cached hash. The hash is computed once during allocation for immutable types.
-    pub fn py_hash_u64(&self, heap: &Heap) -> Option<u64> {
+    /// For heap-allocated objects (Ref variant), this computes the hash lazily
+    /// on first use and caches it for subsequent calls.
+    pub fn py_hash_u64(&self, heap: &mut Heap) -> Option<u64> {
         match self {
             // Immediate values can be hashed directly
             Self::Undefined => Some(0),
@@ -338,9 +345,8 @@ impl Object {
                 // based on the exception type and argument for proper distribution
                 Some(e.py_hash())
             }
-            // For heap-allocated objects, use the cached hash
-            // No cached hash means it's a mutable type (list, dict)
-            Self::Ref(id) => heap.get_cached_hash(*id),
+            // For heap-allocated objects, compute hash lazily and cache it
+            Self::Ref(id) => heap.get_or_compute_hash(*id),
         }
     }
 
@@ -357,7 +363,7 @@ impl Object {
     ///
     /// This method requires heap access to work with heap-allocated objects and
     /// to generate accurate error messages.
-    pub fn call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Vec<Self>) -> RunResult<'c, Object> {
+    pub fn call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         if let Self::Ref(id) = self {
             heap.call_attr(*id, attr, args)
         } else {

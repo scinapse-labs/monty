@@ -7,6 +7,7 @@ use crate::heap::{Heap, HeapData};
 use crate::object::{Attr, Object};
 use crate::operators::{CmpOperator, Operator};
 use crate::parse::CodeRange;
+use crate::ParseResult;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Identifier<'c> {
@@ -19,12 +20,6 @@ impl<'c> Identifier<'c> {
     pub fn new(name: String, position: CodeRange<'c>) -> Self {
         Self { name, position, id: 0 }
     }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Kwarg<'c> {
-    pub key: Identifier<'c>,
-    pub value: ExprLoc<'c>,
 }
 
 /// Represents a callable entity in the Python runtime.
@@ -81,14 +76,12 @@ pub(crate) enum Expr<'c> {
     Name(Identifier<'c>),
     Call {
         callable: Callable<'c>,
-        args: Vec<ExprLoc<'c>>,
-        kwargs: Vec<Kwarg<'c>>,
+        args: ArgsExpr<'c>,
     },
     AttrCall {
         object: Identifier<'c>,
         attr: Attr,
-        args: Vec<ExprLoc<'c>>,
-        kwargs: Vec<Kwarg<'c>>,
+        args: ArgsExpr<'c>,
     },
     Op {
         left: Box<ExprLoc<'c>>,
@@ -114,16 +107,8 @@ impl fmt::Display for Expr<'_> {
         match self {
             Self::Constant(object) => write!(f, "{}", object.repr()),
             Self::Name(identifier) => write!(f, "{}", identifier.name),
-            Self::Call { callable, args, kwargs } => self.print_args(f, callable, args, kwargs),
-            Self::AttrCall {
-                object,
-                attr,
-                args,
-                kwargs,
-            } => {
-                write!(f, "{}.", object.name)?;
-                self.print_args(f, attr, args, kwargs)
-            }
+            Self::Call { callable, args } => write!(f, "{callable}{args}"),
+            Self::AttrCall { object, attr, args } => write!(f, "{}.{}{}", object.name, attr, args),
             Self::Op { left, op, right } => write!(f, "{left} {op} {right}"),
             Self::CmpOp { left, op, right } => write!(f, "{left} {op} {right}"),
             Self::List(itms) => {
@@ -160,42 +145,9 @@ impl fmt::Display for Expr<'_> {
     }
 }
 
-impl<'c> Expr<'c> {
+impl Expr<'_> {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::Constant(Const::None))
-    }
-
-    fn print_args(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        func: impl fmt::Display,
-        args: &[ExprLoc<'c>],
-        kwargs: &[Kwarg<'c>],
-    ) -> fmt::Result {
-        write!(f, "{func}(")?;
-        let mut pos_args = false;
-        for (index, arg) in args.iter().enumerate() {
-            if index == 0 {
-                write!(f, "{arg}")?;
-            } else {
-                write!(f, ", {arg}")?;
-            }
-            pos_args = true;
-        }
-        if pos_args {
-            for kwarg in kwargs {
-                write!(f, ", {}={}", kwarg.key.name, kwarg.value)?;
-            }
-        } else {
-            for (index, kwarg) in kwargs.iter().enumerate() {
-                if index == 0 {
-                    write!(f, "{}={}", kwarg.key.name, kwarg.value)?;
-                } else {
-                    write!(f, ", {}={}", kwarg.key.name, kwarg.value)?;
-                }
-            }
-        }
-        write!(f, ")")
     }
 }
 
@@ -320,6 +272,135 @@ pub(crate) enum Node<'c> {
 pub enum FrameExit<'c> {
     Return(Object),
     // Yield(Object),
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Planned for future use
     Raise(ExceptionRaise<'c>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Kwarg<'c> {
+    pub key: Identifier<'c>,
+    pub value: ExprLoc<'c>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ArgsExpr<'c> {
+    Zero,
+    One(Box<ExprLoc<'c>>),
+    Two(Box<ExprLoc<'c>>, Box<ExprLoc<'c>>),
+    Args(Vec<ExprLoc<'c>>),
+    Kwargs(Vec<Kwarg<'c>>),
+    ArgsKargs {
+        args: Vec<ExprLoc<'c>>,
+        kwargs: Vec<Kwarg<'c>>,
+    },
+}
+
+impl fmt::Display for ArgsExpr<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        match self {
+            Self::Zero => {}
+            Self::One(arg) => write!(f, "{arg}")?,
+            Self::Two(arg1, arg2) => write!(f, "{arg1}, {arg2}")?,
+            Self::Args(args) => {
+                for (index, arg) in args.iter().enumerate() {
+                    if index == 0 {
+                        write!(f, "{arg}")?;
+                    } else {
+                        write!(f, ", {arg}")?;
+                    }
+                }
+            }
+            Self::Kwargs(kwargs) => {
+                for (index, kwarg) in kwargs.iter().enumerate() {
+                    if index == 0 {
+                        write!(f, "{}={}", kwarg.key.name, kwarg.value)?;
+                    } else {
+                        write!(f, ", {}={}", kwarg.key.name, kwarg.value)?;
+                    }
+                }
+            }
+            Self::ArgsKargs { args, kwargs } => {
+                for (index, arg) in args.iter().enumerate() {
+                    if index == 0 {
+                        write!(f, "{arg}")?;
+                    } else {
+                        write!(f, ", {arg}")?;
+                    }
+                }
+                for kwarg in kwargs {
+                    write!(f, ", {}={}", kwarg.key.name, kwarg.value)?;
+                }
+            }
+        }
+        write!(f, ")")
+    }
+}
+
+impl<'c> ArgsExpr<'c> {
+    pub fn new(args: Vec<ExprLoc<'c>>, kwargs: Vec<Kwarg<'c>>) -> Self {
+        if !kwargs.is_empty() {
+            if args.is_empty() {
+                Self::Kwargs(kwargs)
+            } else {
+                Self::ArgsKargs { args, kwargs }
+            }
+        } else if args.len() > 2 {
+            Self::Args(args)
+        } else {
+            let mut iter = args.into_iter();
+            if let Some(first) = iter.next() {
+                if let Some(second) = iter.next() {
+                    Self::Two(Box::new(first), Box::new(second))
+                } else {
+                    Self::One(Box::new(first))
+                }
+            } else {
+                Self::Zero
+            }
+        }
+    }
+
+    /// Applies a transformation function to all `ExprLoc` elements in the args.
+    ///
+    /// This is used during the preparation phase to recursively prepare all
+    /// argument expressions before execution.
+    pub fn prepare_args(
+        &mut self,
+        mut f: impl FnMut(ExprLoc<'c>) -> ParseResult<'c, ExprLoc<'c>>,
+    ) -> ParseResult<'c, ()> {
+        // Swap self with Empty to take ownership, then rebuild
+        let taken = std::mem::replace(self, Self::Zero);
+        *self = match taken {
+            Self::Zero => Self::Zero,
+            Self::One(arg) => Self::One(Box::new(f(*arg)?)),
+            Self::Two(arg1, arg2) => Self::Two(Box::new(f(*arg1)?), Box::new(f(*arg2)?)),
+            Self::Args(args) => Self::Args(args.into_iter().map(&mut f).collect::<ParseResult<'c, Vec<_>>>()?),
+            Self::Kwargs(kwargs) => Self::Kwargs(
+                kwargs
+                    .into_iter()
+                    .map(|kwarg| {
+                        Ok(Kwarg {
+                            key: kwarg.key,
+                            value: f(kwarg.value)?,
+                        })
+                    })
+                    .collect::<ParseResult<'c, Vec<_>>>()?,
+            ),
+            Self::ArgsKargs { args, kwargs } => {
+                let args = args.into_iter().map(&mut f).collect::<ParseResult<'c, Vec<_>>>()?;
+                let kwargs = kwargs
+                    .into_iter()
+                    .map(|kwarg| {
+                        Ok(Kwarg {
+                            key: kwarg.key,
+                            value: f(kwarg.value)?,
+                        })
+                    })
+                    .collect::<ParseResult<'c, Vec<_>>>()?;
+                Self::ArgsKargs { args, kwargs }
+            }
+        };
+        Ok(())
+    }
 }

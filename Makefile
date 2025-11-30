@@ -47,7 +47,7 @@ bench: ## Run benchmarks
 
 .PHONY: profile
 profile: ## Profile the code with pprof and generate flamegraphs
-	cargo bench --bench main --profile profiling -- --profile-time=5
+	cargo bench --bench main --profile profiling -- --profile-time=10
 	uv run scripts/flamegraph_to_text.py
 
 .PHONY: all

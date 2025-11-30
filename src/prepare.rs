@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use ahash::AHashMap;
 
 use crate::exceptions::{ExcType, ExceptionRaise, SimpleException};
-use crate::expressions::{Const, Expr, ExprLoc, Identifier, Kwarg, Node};
+use crate::expressions::{ArgsExpr, Const, Expr, ExprLoc, Identifier, Node};
 use crate::operators::{CmpOperator, Operator};
 use crate::parse_error::{ParseError, ParseResult};
 
@@ -127,8 +127,7 @@ impl Prepare {
                                     })?;
                                     let expr = Expr::Call {
                                         callable,
-                                        args: vec![],
-                                        kwargs: vec![],
+                                        args: ArgsExpr::Zero,
                                     };
                                     Some(ExprLoc::new(id.position, expr))
                                 }
@@ -206,17 +205,12 @@ impl Prepare {
                 op,
                 right: Box::new(self.prepare_expression(*right)?),
             },
-            Expr::Call { callable, args, kwargs } => {
+            Expr::Call { callable, mut args } => {
                 // The callable is already resolved, just prepare the arguments and pass through
-                let (args, kwargs) = self.get_args_kwargs(args, kwargs)?;
-                Expr::Call { callable, args, kwargs }
+                args.prepare_args(|expr| self.prepare_expression(expr))?;
+                Expr::Call { callable, args }
             }
-            Expr::AttrCall {
-                object,
-                attr,
-                args,
-                kwargs,
-            } => {
+            Expr::AttrCall { object, attr, mut args } => {
                 let (object, is_new) = self.get_id(object);
                 // Unlike regular name lookups, attribute calls require the object to already exist.
                 // Calling a method on an undefined variable should fail at prepare-time, not runtime.
@@ -225,13 +219,8 @@ impl Prepare {
                     let exc: ExceptionRaise = SimpleException::new(ExcType::NameError, Some(object.name.into())).into();
                     return Err(exc.into());
                 }
-                let (args, kwargs) = self.get_args_kwargs(args, kwargs)?;
-                Expr::AttrCall {
-                    object,
-                    attr,
-                    args,
-                    kwargs,
-                }
+                args.prepare_args(|expr| self.prepare_expression(expr))?;
+                Expr::AttrCall { object, attr, args }
             }
             Expr::List(elements) => {
                 let expressions = elements
@@ -293,19 +282,6 @@ impl Prepare {
         Ok(ExprLoc { position, expr })
     }
 
-    /// Prepares a keyword argument by preparing its value expression.
-    ///
-    /// # TODO / Limitation
-    /// Keyword names currently stay as raw identifiers because they represent argument labels,
-    /// not namespace-bound variables. Revisit when kwargs gain full support (we may switch keys
-    /// to strings or resolve them explicitly).
-    fn prepare_kwarg<'c>(&mut self, kwarg: Kwarg<'c>) -> ParseResult<'c, Kwarg<'c>> {
-        let Kwarg { key, value } = kwarg;
-        let value = self.prepare_expression(value)?;
-        // Keyword identifiers are left untouched for now (see docstring above).
-        Ok(Kwarg { key, value })
-    }
-
     /// Resolves an identifier to its namespace index, creating a new entry if needed.
     ///
     /// This is the core name resolution mechanism. If the name already exists in the name_map,
@@ -337,28 +313,5 @@ impl Prepare {
             },
             is_new,
         )
-    }
-
-    /// Prepares positional and keyword arguments for a function call.
-    ///
-    /// All argument expressions are recursively prepared through `prepare_expression`
-    /// and `prepare_kwarg`, resolving any names and transforming nested calls.
-    ///
-    /// # Returns
-    /// A tuple of (prepared args vector, prepared kwargs vector)
-    fn get_args_kwargs<'c>(
-        &mut self,
-        args: Vec<ExprLoc<'c>>,
-        kwargs: Vec<Kwarg<'c>>,
-    ) -> ParseResult<'c, (Vec<ExprLoc<'c>>, Vec<Kwarg<'c>>)> {
-        let args = args
-            .into_iter()
-            .map(|e| self.prepare_expression(e))
-            .collect::<ParseResult<_>>()?;
-        let kwargs = kwargs
-            .into_iter()
-            .map(|kwarg| self.prepare_kwarg(kwarg))
-            .collect::<ParseResult<_>>()?;
-        Ok((args, kwargs))
     }
 }

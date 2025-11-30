@@ -8,6 +8,7 @@
 /// dispatch on `HeapData` without boxing overhead.
 use std::borrow::Cow;
 
+use crate::args::Args;
 use crate::exceptions::ExcType;
 use crate::heap::{Heap, ObjectId};
 use crate::object::{Attr, Object};
@@ -37,8 +38,9 @@ pub trait PyValue {
     /// Python equality comparison (`==`).
     ///
     /// For containers, this performs element-wise comparison using the heap
-    /// to resolve nested references.
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool;
+    /// to resolve nested references. Takes `&mut Heap` to allow lazy hash
+    /// computation for dict key lookups.
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool;
 
     /// Pushes any contained `ObjectId`s onto the stack for reference counting.
     ///
@@ -89,7 +91,7 @@ pub trait PyValue {
     /// Calls an attribute method on this value (e.g., `list.append()`).
     ///
     /// Returns an error if the attribute doesn't exist or the arguments are invalid.
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Args) -> RunResult<'c, Object> {
         Err(ExcType::attribute_error(self.py_type(heap), attr))
     }
 

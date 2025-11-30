@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
-use crate::exceptions::{check_arg_count, ExcType};
+use crate::args::Args;
+use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapData, ObjectId};
 use crate::object::{Attr, Object};
 use crate::run::RunResult;
@@ -25,7 +26,7 @@ impl List {
     /// Note: This does NOT increment reference counts - the caller must
     /// ensure refcounts are properly managed.
     #[must_use]
-    pub fn from_vec(vec: Vec<Object>) -> Self {
+    pub fn new(vec: Vec<Object>) -> Self {
         Self(vec)
     }
 
@@ -74,10 +75,9 @@ impl List {
     /// was already incremented (e.g., via `clone_with_heap` or `evaluate_use`).
     ///
     /// Returns `Object::None`, matching Python's behavior where `list.append()` returns None.
-    pub fn append(&mut self, _heap: &mut Heap, item: Object) -> Object {
+    pub fn append(&mut self, _heap: &mut Heap, item: Object) {
         // Ownership transfer - refcount was already handled by caller
         self.0.push(item);
-        Object::None
     }
 
     /// Inserts an element at the specified index.
@@ -91,7 +91,7 @@ impl List {
     ///   the item is appended to the end (matching Python semantics).
     ///
     /// Returns `Object::None`, matching Python's behavior where `list.insert()` returns None.
-    pub fn insert(&mut self, _heap: &mut Heap, index: usize, item: Object) -> Object {
+    pub fn insert(&mut self, _heap: &mut Heap, index: usize, item: Object) {
         // Ownership transfer - refcount was already handled by caller
         // Python's insert() appends if index is out of bounds
         if index >= self.0.len() {
@@ -99,8 +99,6 @@ impl List {
         } else {
             self.0.insert(index, item);
         }
-
-        Object::None
     }
 }
 
@@ -139,8 +137,16 @@ impl PyValue for List {
         Ok(self.0[normalized_index as usize].clone_with_heap(heap))
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
-        self.0.len() == other.0.len() && self.0.iter().zip(&other.0).all(|(i1, i2)| i1.py_eq(i2, heap))
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        for (i1, i2) in self.0.iter().zip(&other.0) {
+            if !i1.py_eq(i2, heap) {
+                return false;
+            }
+        }
+        true
     }
 
     fn py_dec_ref_ids(&self, stack: &mut Vec<ObjectId>) {
@@ -164,7 +170,7 @@ impl PyValue for List {
         let mut result: Vec<Object> = self.0.iter().map(|obj| obj.clone_with_heap(heap)).collect();
         let other_cloned: Vec<Object> = other.0.iter().map(|obj| obj.clone_with_heap(heap)).collect();
         result.extend(other_cloned);
-        let id = heap.allocate(HeapData::List(List::from_vec(result)));
+        let id = heap.allocate(HeapData::List(List::new(result)));
         Some(Object::Ref(id))
     }
 
@@ -199,20 +205,20 @@ impl PyValue for List {
         Ok(())
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         match attr {
             Attr::Append => {
-                let [item] = check_arg_count::<1>("list.append", args)?;
-                Ok(self.append(heap, item))
+                let item = args.get_one_arg("list.append")?;
+                self.append(heap, item);
+                Ok(Object::None)
             }
             Attr::Insert => {
-                let [index_obj, item] = check_arg_count::<2>("insert", args)?;
+                let (index_obj, item) = args.get_two_args("insert")?;
                 let index = index_obj.as_int()? as usize;
-                Ok(self.insert(heap, index, item))
+                self.insert(heap, index, item);
+                Ok(Object::None)
             }
-            Attr::Get | Attr::Keys | Attr::Values | Attr::Items | Attr::Pop | Attr::Other(_) => {
-                Err(ExcType::attribute_error("list", attr))
-            }
+            _ => Err(ExcType::attribute_error("list", attr)),
         }
     }
 }

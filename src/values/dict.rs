@@ -3,6 +3,7 @@ use std::fmt::Write;
 
 use indexmap::IndexMap;
 
+use crate::args::Args;
 use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapData, ObjectId};
 use crate::object::{Attr, Object};
@@ -44,7 +45,7 @@ impl Dict {
     /// Assumes the caller is transferring ownership of all keys and values in the pairs.
     /// Does NOT increment reference counts since ownership is being transferred.
     /// Returns Err if any key is unhashable (e.g., list, dict).
-    pub fn from_pairs(pairs: Vec<(Object, Object)>, heap: &Heap) -> RunResult<'static, Self> {
+    pub fn from_pairs(pairs: Vec<(Object, Object)>, heap: &mut Heap) -> RunResult<'static, Self> {
         let mut dict = Self::new();
         for (key, value) in pairs {
             dict.set_transfer_ownership(key, value, heap)?;
@@ -60,7 +61,7 @@ impl Dict {
         &mut self,
         key: Object,
         value: Object,
-        heap: &Heap,
+        heap: &mut Heap,
     ) -> RunResult<'static, Option<Object>> {
         let hash = key
             .py_hash_u64(heap)
@@ -88,7 +89,7 @@ impl Dict {
     ///
     /// Returns Ok(Some(value)) if key exists, Ok(None) if key doesn't exist.
     /// Returns Err if key is unhashable.
-    pub fn get(&self, key: &Object, heap: &Heap) -> RunResult<'static, Option<&Object>> {
+    pub fn get(&self, key: &Object, heap: &mut Heap) -> RunResult<'static, Option<&Object>> {
         let hash = key
             .py_hash_u64(heap)
             .ok_or_else(|| ExcType::type_error_unhashable(key.py_type(heap)))?;
@@ -248,7 +249,7 @@ impl PyValue for Dict {
         Some(self.len())
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -330,18 +331,12 @@ impl PyValue for Dict {
         Ok(())
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         match attr {
             Attr::Get => {
-                if args.is_empty() {
-                    return Err(ExcType::type_error_at_least("get", 1, 0));
-                }
-                if args.len() > 2 {
-                    return Err(ExcType::type_error_at_most("get", 2, args.len()));
-                }
-                let key = &args[0];
+                let (key, opt_default) = args.get_one_two_args("get")?;
                 // Use copy_for_extend to avoid borrow conflict, then increment refcount
-                let result = self.get(key, heap)?.map(Object::copy_for_extend);
+                let result = self.get(&key, heap)?.map(Object::copy_for_extend);
                 match result {
                     Some(value) => {
                         if let Object::Ref(id) = &value {
@@ -351,8 +346,8 @@ impl PyValue for Dict {
                     }
                     None => {
                         // Return default if provided, else None
-                        if args.len() == 2 {
-                            Ok(args[1].clone_with_heap(heap))
+                        if let Some(default) = opt_default {
+                            Ok(default.clone_with_heap(heap))
                         } else {
                             Ok(Object::None)
                         }
@@ -360,27 +355,21 @@ impl PyValue for Dict {
                 }
             }
             Attr::Keys => {
-                if !args.is_empty() {
-                    return Err(ExcType::type_error_no_args("dict.keys", args.len()));
-                }
+                args.check_zero_args("dict.keys")?;
                 // keys() now handles refcount incrementing
                 let keys = self.keys(heap);
-                let list_id = heap.allocate(HeapData::List(crate::values::List::from_vec(keys)));
+                let list_id = heap.allocate(HeapData::List(crate::values::List::new(keys)));
                 Ok(Object::Ref(list_id))
             }
             Attr::Values => {
-                if !args.is_empty() {
-                    return Err(ExcType::type_error_no_args("dict.values", args.len()));
-                }
+                args.check_zero_args("dict.values")?;
                 // values() now handles refcount incrementing
                 let values = self.values(heap);
-                let list_id = heap.allocate(HeapData::List(crate::values::List::from_vec(values)));
+                let list_id = heap.allocate(HeapData::List(crate::values::List::new(values)));
                 Ok(Object::Ref(list_id))
             }
             Attr::Items => {
-                if !args.is_empty() {
-                    return Err(ExcType::type_error_no_args("dict.items", args.len()));
-                }
+                args.check_zero_args("dict.items")?;
                 // items() now handles refcount incrementing for the returned objects
                 let items = self.items(heap);
                 // Convert to list of tuples
@@ -389,18 +378,12 @@ impl PyValue for Dict {
                     let tuple_id = heap.allocate(HeapData::Tuple(crate::values::Tuple::from_vec(vec![k, v])));
                     tuples.push(Object::Ref(tuple_id));
                 }
-                let list_id = heap.allocate(HeapData::List(crate::values::List::from_vec(tuples)));
+                let list_id = heap.allocate(HeapData::List(crate::values::List::new(tuples)));
                 Ok(Object::Ref(list_id))
             }
             Attr::Pop => {
-                if args.is_empty() {
-                    return Err(ExcType::type_error_at_least("pop", 1, 0));
-                }
-                if args.len() > 2 {
-                    return Err(ExcType::type_error_at_most("pop", 2, args.len()));
-                }
-                let key = &args[0];
-                match self.pop(key, heap)? {
+                let (key, opt_default) = args.get_one_two_args("pop")?;
+                match self.pop(&key, heap)? {
                     Some((k, v)) => {
                         // Decrement key refcount since we're not returning it
                         k.drop_with_heap(heap);
@@ -408,10 +391,10 @@ impl PyValue for Dict {
                     }
                     None => {
                         // Return default if provided, else KeyError
-                        if args.len() == 2 {
-                            Ok(args[1].clone_with_heap(heap))
+                        if let Some(default) = opt_default {
+                            Ok(default.clone_with_heap(heap))
                         } else {
-                            Err(ExcType::key_error(key, heap))
+                            Err(ExcType::key_error(&key, heap))
                         }
                     }
                 }

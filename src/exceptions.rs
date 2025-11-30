@@ -155,22 +155,6 @@ impl ExcType {
     }
 }
 
-/// Validates argument count and returns args as a fixed-size array.
-///
-/// Uses const generics so the compiler knows the exact array size at compile time,
-/// enabling safe pattern matching without runtime indexing or `.unwrap()`.
-pub fn check_arg_count<'c, const N: usize>(name: &str, args: Vec<Object>) -> Result<[Object; N], RunError<'c>> {
-    let actual = args.len();
-    if actual == N {
-        // Safe: we just verified length equals N
-        Ok(args
-            .try_into()
-            .unwrap_or_else(|_| unreachable!("length was just verified")))
-    } else {
-        Err(ExcType::type_error_arg_count(name, N, actual))
-    }
-}
-
 /// Simple lightweight representation of an exception.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimpleException {

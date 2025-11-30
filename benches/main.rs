@@ -35,8 +35,8 @@ fn add_two_cpython(bench: &mut Bencher) {
         .unwrap()
         .into();
 
-        let r = fun.call0(py).unwrap();
-        let r: i64 = r.extract(py).unwrap();
+        let r_py = fun.call0(py).unwrap();
+        let r: i64 = r_py.extract(py).unwrap();
         assert_eq!(r, 3);
 
         bench.iter(|| {
@@ -87,8 +87,8 @@ fn dict_set_get_cpython(bench: &mut Bencher) {
         .unwrap()
         .into();
 
-        let r = fun.call0(py).unwrap();
-        let r: String = r.extract(py).unwrap();
+        let r_py = fun.call0(py).unwrap();
+        let r: String = r_py.extract(py).unwrap();
         assert_eq!(r, "value");
 
         bench.iter(|| {
@@ -103,7 +103,7 @@ fn list_append_monty(bench: &mut Bencher) {
     let mut ex = Executor::new(
         "
 a = []
-a.append('value')
+a.append(42)
 a[0]
         ",
         "test.py",
@@ -112,12 +112,12 @@ a[0]
     .unwrap();
 
     let r = ex.run(vec![]).unwrap();
-    let value: String = (&r.value().unwrap()).try_into().unwrap();
-    assert_eq!(value, "value");
+    let value: i64 = (&r.value().unwrap()).try_into().unwrap();
+    assert_eq!(value, 42);
 
     bench.iter(|| {
         let r = ex.run(vec![]).unwrap();
-        let value: String = (&r.value().unwrap()).try_into().unwrap();
+        let value: i64 = (&r.value().unwrap()).try_into().unwrap();
         black_box(value);
     });
 }
@@ -129,7 +129,7 @@ fn list_append_cpython(bench: &mut Bencher) {
             py,
             "def main():
                 a = []
-                a.append('value')
+                a.append(42)
                 return a[0]
             ",
             "test.py",
@@ -140,13 +140,13 @@ fn list_append_cpython(bench: &mut Bencher) {
         .unwrap()
         .into();
 
-        let r = fun.call0(py).unwrap();
-        let r: String = r.extract(py).unwrap();
-        assert_eq!(r, "value");
+        let r_py = fun.call0(py).unwrap();
+        let r: i64 = r_py.extract(py).unwrap();
+        assert_eq!(r, 42);
 
         bench.iter(|| {
             let r_py = fun.call0(py).unwrap();
-            let r: String = r_py.extract(py).unwrap();
+            let r: i64 = r_py.extract(py).unwrap();
             black_box(r);
         });
     });

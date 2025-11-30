@@ -5,6 +5,7 @@
 /// reference counting for heap-allocated objects.
 use std::borrow::Cow;
 
+use crate::args::Args;
 use crate::exceptions::ExcType;
 use crate::heap::{Heap, ObjectId};
 use crate::object::{Attr, Object};
@@ -99,8 +100,16 @@ impl PyValue for Tuple {
         Ok(self.0[normalized_index as usize].clone_with_heap(heap))
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
-        self.0.len() == other.0.len() && self.0.iter().zip(&other.0).all(|(i1, i2)| i1.py_eq(i2, heap))
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        for (i1, i2) in self.0.iter().zip(&other.0) {
+            if !i1.py_eq(i2, heap) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Pushes all heap object IDs contained in this tuple onto the stack.
@@ -115,7 +124,7 @@ impl PyValue for Tuple {
     }
 
     /// Tuples don't support attribute calls.
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Args) -> RunResult<'c, Object> {
         Err(ExcType::attribute_error(self.py_type(heap), attr))
     }
 

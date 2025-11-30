@@ -7,7 +7,7 @@ use ruff_python_ast::{
 use ruff_python_parser::parse_module;
 use ruff_text_size::TextRange;
 
-use crate::expressions::{Callable, Const, Expr, ExprLoc, Identifier, Kwarg, Node};
+use crate::expressions::{ArgsExpr, Callable, Const, Expr, ExprLoc, Identifier, Kwarg, Node};
 use crate::operators::{CmpOperator, Operator};
 use crate::parse_error::{ParseError, ParseResult};
 
@@ -257,12 +257,13 @@ impl<'c> Parser<'c> {
                     .into_vec()
                     .into_iter()
                     .map(|f| self.parse_expression(f))
-                    .collect::<ParseResult<_>>()?;
+                    .collect::<ParseResult<Vec<_>>>()?;
                 let kwargs = keywords
                     .into_vec()
                     .into_iter()
                     .map(|f| self.parse_kwargs(f))
-                    .collect::<ParseResult<_>>()?;
+                    .collect::<ParseResult<Vec<_>>>()?;
+                let args = ArgsExpr::new(args, kwargs);
                 let position = self.convert_range(range);
                 match *func {
                     AstExpr::Name(ast::ExprName { id, range, .. }) => {
@@ -271,7 +272,7 @@ impl<'c> Parser<'c> {
                             Ok(func) => func,
                             Err(()) => Callable::Ident(Identifier::new(name, self.convert_range(range))),
                         };
-                        Ok(ExprLoc::new(position, Expr::Call { callable, args, kwargs }))
+                        Ok(ExprLoc::new(position, Expr::Call { callable, args }))
                     }
                     AstExpr::Attribute(ast::ExprAttribute { value, attr, .. }) => {
                         let object = self.parse_identifier(*value)?;
@@ -281,7 +282,6 @@ impl<'c> Parser<'c> {
                                 object,
                                 attr: attr.id().to_string().into(),
                                 args,
-                                kwargs,
                             },
                         ))
                     }

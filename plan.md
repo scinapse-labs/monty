@@ -184,12 +184,11 @@ struct HeapObject {
     /// Reference count for memory management
     refcount: usize,
 
-    /// Optional cached hash for immutable objects (str, tuple, bytes, etc.).
-    /// Needed because hashing `Object::Ref` requires heap context.
-    cached_hash: Option<u64>,
+    /// Hash metadata describing whether the entry is hashable and the cached value.
+    hash_state: HashState,
 
-    /// Actual object data
-    data: HeapData,
+    /// Actual object data (temporarily `None` while borrowed by helpers)
+    data: Option<HeapData>,
 }
 
 /// Data stored on heap (actual implementation)
@@ -204,19 +203,18 @@ pub enum HeapData {
 }
 ```
 
-**Why cache hashes?**
+**Why track hash state?**
 
 - The Python dictionary model allows strings, tuples, and other immutable types as keys.
-- Adding `FrozenSet` to `HeapData` makes it hashable (like CPython) while `Set` stays mutable/unhashable.
-- Rust's `Hash` trait does not accept extra context, so hashing `Object::Ref(id)` cannot look inside the heap unless we pre-compute a hash when the object is created.
-- `cached_hash` stores that value for immutable heap entries. Mutable types (lists, dicts) leave it as `None` so any attempt to hash them raises `TypeError`, matching CPython.
+- Rust's `Hash` trait does not accept extra context, so hashing `Object::Ref(id)` must consult heap metadata.
+- `HashState` records whether an entry is known to be unhashable, still needs its hash computed, or already cached. This lets us avoid touching the payload when it is temporarily borrowed (e.g., during a method call) while still deferring expensive tuple hashing until actually needed.
 
 ### Dictionary Hashing Strategy
 
-1. **Allocation time**: When creating immutable heap data (str, bytes, tuple/frozenset of hashable elements), compute its hash once and store it in `cached_hash`. Reuse CPython's rules: tuples/frozensets are hashable only if every element is hashable.
-2. **Hash implementation**: `impl Hash for Object` matches on immediates; for `Object::Ref(id)` it fetches the heap slot and feeds the cached hash to the hasher. If `cached_hash` is `None`, raise `TypeError` from the caller instead of trying to hash a mutable object.
-3. **Dictionary storage**: Dictionaries continue to use `HashMap<Object, Object>`, but only `Object`s known to be hashable (checked via `heap.is_hashable(&key)`) reach `HashMap::insert`; otherwise `TypeError` is raised.
-4. **Invalidating hashes**: Because only immutable data can have a cached hash, we never need to recompute or invalidate—it stays correct for the lifetime of the heap entry.
+1. **Allocation time**: Immutable types (str, bytes, tuple/frozenset) start with `HashState::Unknown`; mutable types (list, dict) start as `HashState::Unhashable`.
+2. **Hash implementation**: `Object::py_hash_u64` asks the heap for the cached hash. The heap computes it lazily the first time and stores `HashState::Cached(value)`; unhashable objects remain in `Unhashable`.
+3. **Dictionary storage**: Dictionaries request hashes through this API, so an attempt to hash an unhashable object immediately returns `None`/`TypeError` without inspecting borrowed payloads.
+4. **Invalidating hashes**: Only immutable data can transition away from `HashState::Unknown`, so cached values never need invalidation.
 
 `util::hash_frozenset` sorts the element hashes before folding them so the final value is order-independent, matching CPython's behavior.
 

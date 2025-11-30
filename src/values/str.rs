@@ -4,6 +4,7 @@
 /// operations like length and equality comparison.
 use std::borrow::Cow;
 
+use crate::args::Args;
 use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapData, ObjectId};
 use crate::object::{Attr, Object};
@@ -71,7 +72,7 @@ impl PyValue for Str {
         Some(self.0.len())
     }
 
-    fn py_eq(&self, other: &Self, _heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, _heap: &mut Heap) -> bool {
         self.0 == other.0
     }
 
@@ -116,7 +117,7 @@ impl PyValue for Str {
         }
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, _args: Args) -> RunResult<'c, Object> {
         Err(ExcType::attribute_error(self.py_type(heap), attr))
     }
 }

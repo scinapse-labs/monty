@@ -20,6 +20,7 @@ indexmap = "2.0"
 enum_dispatch = "0.3.13"
 strum = { version = "0.25", features = ["derive"] }
 strum_macros = "0.25"
+smallvec = "1.11"
 
 [features]
 ## Enables ref-count testing support. When enabled, the Executor stores
@@ -51,6 +52,7 @@ strip = true
 inherits = "release"
 debug = true
 strip = false
+lto = false
 
 [lints.clippy]
 # dbg_macro = "warn"

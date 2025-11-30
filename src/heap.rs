@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use crate::args::Args;
 use crate::object::{Attr, Object};
 use crate::run::RunResult;
 // Import AbstractValue trait for enum_dispatch to work
@@ -38,9 +39,9 @@ impl HeapData {
     /// Returns Some(hash) for immutable types (Str, Bytes, Tuple of hashables).
     /// Returns None for mutable types (List, Object) which cannot be dict keys.
     ///
-    /// This is called during heap allocation to precompute and cache hashes,
-    /// avoiding the need to access the heap during hash operations.
-    fn compute_hash_if_immutable(&self, heap: &Heap) -> Option<u64> {
+    /// This is called lazily when the object is first used as a dict key,
+    /// avoiding unnecessary hash computation for objects that are never used as keys.
+    fn compute_hash_if_immutable(&self, heap: &mut Heap) -> Option<u64> {
         match self {
             Self::Str(s) => {
                 let mut hasher = DefaultHasher::new();
@@ -96,7 +97,7 @@ impl PyValue for HeapData {
         }
     }
 
-    fn py_eq(&self, other: &Self, heap: &Heap) -> bool {
+    fn py_eq(&self, other: &Self, heap: &mut Heap) -> bool {
         match (self, other) {
             (Self::Object(a), Self::Object(b)) => a.py_eq(b, heap),
             (Self::Str(a), Self::Str(b)) => a.py_eq(b, heap),
@@ -211,7 +212,7 @@ impl PyValue for HeapData {
         }
     }
 
-    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Vec<Object>) -> RunResult<'c, Object> {
+    fn py_call_attr<'c>(&mut self, heap: &mut Heap, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         match self {
             Self::Object(obj) => obj.py_call_attr(heap, attr, args),
             Self::Str(s) => s.py_call_attr(heap, attr, args),
@@ -245,11 +246,31 @@ impl PyValue for HeapData {
     }
 }
 
-/// A single entry inside the heap arena, storing refcount and payload.
+/// Hash caching state stored alongside each heap entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HashState {
+    /// Hash has not yet been computed but the object might be hashable.
+    Unknown,
+    /// Cached hash value for immutable types that have been hashed at least once.
+    Cached(u64),
+    /// Object is unhashable (mutable types or tuples containing unhashables).
+    Unhashable,
+}
+
+impl HashState {
+    fn for_data(data: &HeapData) -> Self {
+        match data {
+            HeapData::Str(_) | HeapData::Bytes(_) | HeapData::Tuple(_) => Self::Unknown,
+            _ => Self::Unhashable,
+        }
+    }
+}
+
+/// A single entry inside the heap arena, storing refcount, payload, and hash metadata.
 ///
-/// The `cached_hash` field is used to store precomputed hashes for immutable types
-/// (Str, Bytes, Tuple) to allow them to be used as dict keys. Mutable types (List, Dict)
-/// have `cached_hash = None` and will raise TypeError if used as dict keys.
+/// The `hash_state` field tracks whether the heap entry is hashable and, if so,
+/// caches the computed hash. Mutable types (List, Dict) start as `Unhashable` and
+/// will raise TypeError if used as dict keys.
 ///
 /// The `data` field is an Option to support temporary borrowing: when methods like
 /// `with_entry_mut` or `call_attr` need mutable access to both the data and the heap,
@@ -261,8 +282,8 @@ struct HeapObject {
     refcount: usize,
     /// The payload data. Temporarily `None` while borrowed via `with_entry_mut`/`call_attr`.
     data: Option<HeapData>,
-    /// Cached hash value for immutable types, None for mutable types
-    cached_hash: Option<u64>,
+    /// Current hashing status / cached hash value
+    hash_state: HashState,
 }
 
 /// Reference-counted arena that backs all heap-only runtime objects.
@@ -305,16 +326,16 @@ macro_rules! restore_data {
 impl Heap {
     /// Allocates a new heap object, returning the fresh identifier.
     ///
-    /// For immutable types (Str, Bytes, Tuple), this precomputes and caches
-    /// the hash value so they can be used as dict keys. Mutable types (List)
-    /// get cached_hash = None.
+    /// Hash computation is deferred until the object is used as a dict key
+    /// (via `get_or_compute_hash`). This avoids computing hashes for objects
+    /// that are never used as dict keys, improving allocation performance.
     pub fn allocate(&mut self, data: HeapData) -> ObjectId {
-        let cached_hash = data.compute_hash_if_immutable(self);
         let id = self.objects.len();
+        let hash_state = HashState::for_data(&data);
         self.objects.push(Some(HeapObject {
             refcount: 1,
             data: Some(data),
-            cached_hash,
+            hash_state,
         }));
         id
     }
@@ -335,22 +356,23 @@ impl Heap {
 
     /// Decrements the reference count and frees the object (plus children) once it hits zero.
     ///
+    /// Uses recursion rather than an explicit stack for better performance - avoiding
+    /// repeated Vec allocations and benefiting from call stack locality.
+    ///
     /// # Panics
     /// Panics if the object ID is invalid or the object has already been freed.
     pub fn dec_ref(&mut self, id: ObjectId) {
-        let mut stack = vec![id];
-        while let Some(current) = stack.pop() {
-            let slot = self.objects.get_mut(current).expect("Heap::dec_ref: slot missing");
-            let entry = slot.as_mut().expect("Heap::dec_ref: object already freed");
-            if entry.refcount > 1 {
-                entry.refcount -= 1;
-                continue;
-            }
-
-            // refcount == 1, free the object
-            if let Some(object) = slot.take() {
-                if let Some(data) = object.data {
-                    enqueue_children(&data, &mut stack);
+        let slot = self.objects.get_mut(id).expect("Heap::dec_ref: slot missing");
+        let entry = slot.as_mut().expect("Heap::dec_ref: object already freed");
+        if entry.refcount > 1 {
+            entry.refcount -= 1;
+        } else if let Some(object) = slot.take() {
+            // refcount == 1, free the object and recursively decrement children
+            if let Some(data) = object.data {
+                let mut child_ids = Vec::new();
+                data.py_dec_ref_ids(&mut child_ids);
+                for child_id in child_ids {
+                    self.dec_ref(child_id);
                 }
             }
         }
@@ -389,27 +411,52 @@ impl Heap {
             .expect("Heap::get_mut: data currently borrowed")
     }
 
-    /// Returns the cached hash for the heap object at the given ID.
+    /// Returns or computes the hash for the heap object at the given ID.
     ///
-    /// Returns Some(hash) for immutable types, None for mutable types.
+    /// Hashes are computed lazily on first use and then cached. Returns
+    /// Some(hash) for immutable types (Str, Bytes, hashable Tuple), None
+    /// for mutable types (List, Dict).
     ///
     /// # Panics
     /// Panics if the object ID is invalid or the object has already been freed.
-    #[must_use]
-    pub fn get_cached_hash(&self, id: ObjectId) -> Option<u64> {
-        self.objects
-            .get(id)
-            .expect("Heap::get_cached_hash: slot missing")
-            .as_ref()
-            .expect("Heap::get_cached_hash: object already freed")
-            .cached_hash
+    pub fn get_or_compute_hash(&mut self, id: ObjectId) -> Option<u64> {
+        let entry = self
+            .objects
+            .get_mut(id)
+            .expect("Heap::get_or_compute_hash: slot missing")
+            .as_mut()
+            .expect("Heap::get_or_compute_hash: object already freed");
+
+        match entry.hash_state {
+            HashState::Unhashable => return None,
+            HashState::Cached(hash) => return Some(hash),
+            HashState::Unknown => {}
+        }
+
+        // Compute hash lazily - need to temporarily take data to avoid borrow conflict
+        let data = entry.data.take().expect("Heap::get_or_compute_hash: data borrowed");
+        let hash = data.compute_hash_if_immutable(self);
+
+        // Restore data and cache the hash if computed
+        let entry = self
+            .objects
+            .get_mut(id)
+            .expect("Heap::get_or_compute_hash: slot missing after compute")
+            .as_mut()
+            .expect("Heap::get_or_compute_hash: object freed during compute");
+        entry.data = Some(data);
+        entry.hash_state = match hash {
+            Some(value) => HashState::Cached(value),
+            None => HashState::Unhashable,
+        };
+        hash
     }
 
     /// Calls an attribute on the heap object at `id` while temporarily taking ownership
     /// of its payload so we can borrow the heap again inside the call. This avoids the
     /// borrow checker conflict that arises when attribute implementations also need
     /// mutable access to the heap (e.g. for refcounting).
-    pub fn call_attr<'c>(&mut self, id: ObjectId, attr: &Attr, args: Vec<Object>) -> RunResult<'c, Object> {
+    pub fn call_attr<'c>(&mut self, id: ObjectId, attr: &Attr, args: Args) -> RunResult<'c, Object> {
         // Take data out in a block so the borrow of self.objects ends
         let mut data = take_data!(self, id, "call_attr");
 
@@ -505,12 +552,4 @@ impl Heap {
     pub fn object_count(&self) -> usize {
         self.objects.iter().filter(|o| o.is_some()).count()
     }
-}
-
-/// Pushes any child object IDs referenced by `data` onto the provided stack so
-/// `dec_ref` can recursively drop entire object graphs without recursion.
-///
-/// Uses the `AbstractValue::push_stack_ids` trait method via enum_dispatch.
-fn enqueue_children(data: &HeapData, stack: &mut Vec<ObjectId>) {
-    data.py_dec_ref_ids(stack);
 }
