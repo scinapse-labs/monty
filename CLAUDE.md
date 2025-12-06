@@ -23,28 +23,6 @@ make lint
 cargo build
 ```
 
-## Tests
-
-Do **NOT** write tests within modules unless explicitly prompted to do so.
-
-Tests should live in the `tests/` directory.
-
-Commands:
-
-```bash
-# Build the project
-cargo build
-
-# Run tests
-cargo test
-
-# Run a specific test
-cargo test execute_ok_add_ints
-
-# Run the interpreter on a Python file
-cargo run -- <file.py>
-```
-
 ## Exception
 
 It's important that exceptions raised/returned by this library match those raised by Python.
@@ -70,9 +48,31 @@ NOTE: COMMENTS AND DOCSTRINGS ARE EXTREMELY IMPORTANT TO THE LONG TERM HEALTH OF
 
 ## Tests
 
+Do **NOT** write tests within modules unless explicitly prompted to do so.
+
+Tests should live in the `tests/` directory.
+
+Commands:
+
+```bash
+# Build the project
+cargo build
+
+# Run tests
+cargo test
+
+# Run a specific test
+cargo test execute_ok_add_ints
+
+# Run the interpreter on a Python file
+cargo run -- <file.py>
+```
+
 Tests should always be as concise as possible while covering all possible cases.
 
-All Python execution behavior tests use file-based fixtures in `test_cases/`. File names: `<group_name>__<test_name>.py`.
+All Python execution behavior tests use file-based fixtures in `test_cases/`. File names: `<group_name>__<test_name>.py`. Unless it's completely obvious what is being tested, add short comments to the test code.
+
+You may test behavior using multiple `assert` statements per file to avoid many small files, unless you're testing `assert` behavior, always add a message to the assert statement.
 
 You should prefer single quotes for strings in python tests.
 

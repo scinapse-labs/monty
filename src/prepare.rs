@@ -167,6 +167,14 @@ impl Prepare {
                     };
                     new_nodes.push(Node::Raise(expr));
                 }
+                ParseNode::Assert { test, msg } => {
+                    let test = self.prepare_expression(test)?;
+                    let msg = match msg {
+                        Some(m) => Some(self.prepare_expression(m)?),
+                        None => None,
+                    };
+                    new_nodes.push(Node::Assert { test, msg });
+                }
                 ParseNode::Assign { target, object } => {
                     let object = self.prepare_expression(object)?;
                     let (target, _) = self.get_id(target);

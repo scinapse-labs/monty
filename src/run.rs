@@ -1,5 +1,7 @@
 use crate::evaluate::{evaluate_bool, evaluate_discard, evaluate_use, namespace_get_mut};
-use crate::exceptions::{exc_err_static, exc_fmt, internal_err, ExcType, InternalRunError, RunError, StackFrame};
+use crate::exceptions::{
+    exc_err_static, exc_fmt, internal_err, ExcType, InternalRunError, RunError, SimpleException, StackFrame,
+};
 use crate::expressions::{ExprLoc, FrameExit, Identifier, Node};
 use crate::function::Function;
 use crate::heap::Heap;
@@ -71,6 +73,7 @@ where
             Node::Return(expr) => return Ok(Some(FrameExit::Return(self.execute_expr(heap, expr)?))),
             Node::ReturnNone => return Ok(Some(FrameExit::Return(Object::None))),
             Node::Raise(exc) => self.raise(heap, exc.as_ref())?,
+            Node::Assert { test, msg } => self.assert_(heap, test, msg.as_ref())?,
             Node::Assign { target, object } => self.assign(heap, target, object)?,
             Node::OpAssign { target, op, object } => self.op_assign(heap, target, op, object)?,
             Node::SubscriptAssign { target, index, value } => {
@@ -119,6 +122,29 @@ where
         } else {
             internal_err!(InternalRunError::TodoError; "plain raise not yet supported")
         }
+    }
+
+    /// Executes an assert statement by evaluating the test expression and raising
+    /// `AssertionError` if the test is falsy.
+    ///
+    /// If a message expression is provided, it is evaluated and used as the exception message.
+    fn assert_(
+        &mut self,
+        heap: &mut Heap<'c, 'e>,
+        test: &'e ExprLoc<'c>,
+        msg: Option<&'e ExprLoc<'c>>,
+    ) -> RunResult<'c, ()> {
+        if !self.execute_expr_bool(heap, test)? {
+            let msg = if let Some(msg_expr) = msg {
+                Some(self.execute_expr(heap, msg_expr)?.py_str(heap).to_string().into())
+            } else {
+                None
+            };
+            return Err(SimpleException::new(ExcType::AssertionError, msg)
+                .with_frame(self.stack_frame(&test.position))
+                .into());
+        }
+        Ok(())
     }
 
     fn assign(

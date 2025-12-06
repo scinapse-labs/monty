@@ -242,6 +242,9 @@ fn run_test(path: &Path, code: &str, expectation: Expectation) {
 /// All other lines are executed as statements.
 ///
 /// If `add_return` is false, all lines are wrapped as-is (for code that raises exceptions).
+///
+/// Special case: if the last line is a statement (like `assert`), it's added as-is
+/// followed by `return None`.
 fn wrap_code_in_function(code: &str, add_return: bool) -> String {
     let lines: Vec<&str> = code.lines().collect();
 
@@ -265,10 +268,20 @@ fn wrap_code_in_function(code: &str, add_return: bool) -> String {
             }
         }
 
-        // Add the last line as a return statement
-        result.push_str("    return ");
-        result.push_str(lines[last_idx]);
-        result.push('\n');
+        let last_line = lines[last_idx].trim();
+        // Check if the last line is a statement (can't be returned as an expression)
+        // Matches both `assert expr` and `assert(expr)` forms
+        if last_line.starts_with("assert ") || last_line.starts_with("assert(") {
+            // Add as statement, then return None
+            result.push_str("    ");
+            result.push_str(lines[last_idx]);
+            result.push_str("\n    return None\n");
+        } else {
+            // Add the last line as a return statement
+            result.push_str("    return ");
+            result.push_str(lines[last_idx]);
+            result.push('\n');
+        }
     } else {
         // Add all lines as-is (for exception tests)
         for line in &lines[..=last_idx] {

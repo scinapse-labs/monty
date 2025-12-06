@@ -23,6 +23,7 @@ use crate::Heap;
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Display, EnumString, IntoStaticStr)]
 pub enum ExcType {
+    AssertionError,
     ValueError,
     TypeError,
     NameError,

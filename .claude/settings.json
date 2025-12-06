@@ -1,18 +1,23 @@
 {
-	"permissions": {
-		"allow": [
-			"Bash(cargo:*)",
-			"Bash(make:*)",
-			"Bash(mkdir:*)",
-			"Bash(uv:*)",
-			"Bash(echo:*)",
-			"Bash(fastmod:*)",
-			"Bash(for f in test_cases/*.py)",
-			"Bash(do head -1 \"$f\")",
-			"Bash(done)",
-			"Bash(while read base)"
-		],
-		"deny": [],
-		"ask": []
-	}
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(make:*)",
+      "Bash(mkdir:*)",
+      "Bash(uv:*)",
+      "Bash(echo:*)",
+      "Bash(fastmod:*)",
+      "Bash(for f in test_cases/*.py)",
+      "Bash(do head -1 \"$f\")",
+      "Bash(done)",
+      "Bash(while read base)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
 }

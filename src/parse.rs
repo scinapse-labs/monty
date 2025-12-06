@@ -22,6 +22,10 @@ pub(crate) enum ParseNode<'c> {
     Return(ExprLoc<'c>),
     ReturnNone,
     Raise(Option<ExprLoc<'c>>),
+    Assert {
+        test: ExprLoc<'c>,
+        msg: Option<ExprLoc<'c>>,
+    },
     Assign {
         target: Identifier<'c>,
         object: ExprLoc<'c>,
@@ -213,7 +217,14 @@ impl<'c> Parser<'c> {
                     Err(ParseError::Todo("Try"))
                 }
             }
-            Stmt::Assert(_) => Err(ParseError::Todo("Assert")),
+            Stmt::Assert(ast::StmtAssert { test, msg, .. }) => {
+                let test = self.parse_expression(*test)?;
+                let msg = match msg {
+                    Some(m) => Some(self.parse_expression(*m)?),
+                    None => None,
+                };
+                Ok(ParseNode::Assert { test, msg })
+            }
             Stmt::Import(_) => Err(ParseError::Todo("Import")),
             Stmt::ImportFrom(_) => Err(ParseError::Todo("ImportFrom")),
             Stmt::Global(_) => Err(ParseError::Todo("Global")),

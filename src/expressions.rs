@@ -207,6 +207,10 @@ pub(crate) enum Node<'c> {
     Return(ExprLoc<'c>),
     ReturnNone,
     Raise(Option<ExprLoc<'c>>),
+    Assert {
+        test: ExprLoc<'c>,
+        msg: Option<ExprLoc<'c>>,
+    },
     Assign {
         target: Identifier<'c>,
         object: ExprLoc<'c>,
