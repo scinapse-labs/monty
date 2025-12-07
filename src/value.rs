@@ -98,7 +98,8 @@ impl<'c, 'e> PyTrait<'c, 'e> for Value<'c, 'e> {
 
     fn py_len(&self, heap: &Heap<'c, 'e>) -> Option<usize> {
         match self {
-            Self::InternString(s) => Some(s.len()),
+            // Count Unicode characters, not bytes, to match Python semantics
+            Self::InternString(s) => Some(s.chars().count()),
             Self::InternBytes(b) => Some(b.len()),
             Self::Ref(id) => heap.get(*id).py_len(heap),
             _ => None,

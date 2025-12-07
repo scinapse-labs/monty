@@ -4,6 +4,7 @@ mod callable;
 mod evaluate;
 pub mod exceptions;
 mod expressions;
+mod fstring;
 mod function;
 mod heap;
 mod namespace;

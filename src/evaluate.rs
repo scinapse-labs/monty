@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use crate::args::{ArgExprs, ArgValues};
 use crate::exceptions::{internal_err, InternalRunError, SimpleException};
 use crate::expressions::{Expr, ExprLoc, Identifier};
+use crate::fstring::evaluate_fstring;
 use crate::heap::{Heap, HeapData};
 use crate::namespace::Namespaces;
 use crate::operators::{CmpOperator, Operator};
@@ -84,6 +85,25 @@ pub(crate) fn evaluate_use<'c, 'e>(
             val.drop_with_heap(heap);
             Ok(Value::Bool(result))
         }
+        Expr::UnaryMinus(operand) => {
+            let val = evaluate_use(namespaces, local_idx, heap, operand)?;
+            match val {
+                Value::Int(n) => Ok(Value::Int(-n)),
+                Value::Float(f) => Ok(Value::Float(-f)),
+                _ => {
+                    use crate::exceptions::{exc_fmt, ExcType};
+                    let type_name = val.py_type(heap);
+                    // Drop the value before returning error to avoid ref counting leak
+                    val.drop_with_heap(heap);
+                    Err(
+                        exc_fmt!(ExcType::TypeError; "bad operand type for unary -: '{type_name}'")
+                            .with_position(expr_loc.position)
+                            .into(),
+                    )
+                }
+            }
+        }
+        Expr::FString(parts) => evaluate_fstring(namespaces, local_idx, heap, parts),
     }
 }
 
@@ -150,8 +170,14 @@ pub(crate) fn evaluate_discard<'c, 'e>(
             }
             Ok(())
         }
-        Expr::Not(operand) => {
+        Expr::Not(operand) | Expr::UnaryMinus(operand) => {
             evaluate_discard(namespaces, local_idx, heap, operand)?;
+            Ok(())
+        }
+        Expr::FString(parts) => {
+            // Still need to evaluate for side effects, then drop
+            let result = evaluate_fstring(namespaces, local_idx, heap, parts)?;
+            result.drop_with_heap(heap);
             Ok(())
         }
     }

@@ -20,9 +20,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: lint-rs
-        name: Lint Rust
-        entry: make lint-rs
+      - id: format-lint-rs
+        name: Format & Lint Rust
+        entry: make format-lint-rs
         types: [rust]
         language: system
         pass_filenames: false

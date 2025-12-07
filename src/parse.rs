@@ -1,8 +1,8 @@
 use std::{borrow::Cow, fmt};
 
 use ruff_python_ast::{
-    self as ast, BoolOp, CmpOp, ElifElseClause, Expr as AstExpr, Keyword, Number, Operator as AstOperator, Stmt,
-    UnaryOp,
+    self as ast, BoolOp, CmpOp, ConversionFlag as RuffConversionFlag, ElifElseClause, Expr as AstExpr,
+    InterpolatedStringElement, Keyword, Number, Operator as AstOperator, Stmt, UnaryOp,
 };
 use ruff_python_parser::parse_module;
 use ruff_text_size::TextRange;
@@ -12,6 +12,7 @@ use crate::builtins::Builtins;
 use crate::callable::Callable;
 use crate::exceptions::ExcType;
 use crate::expressions::{Expr, ExprLoc, Identifier, Literal};
+use crate::fstring::{ConversionFlag, FStringPart, FormatSpec};
 use crate::operators::{CmpOperator, Operator};
 use crate::parse_error::ParseError;
 
@@ -315,7 +316,11 @@ impl<'c> Parser<'c> {
                     let operand = Box::new(self.parse_expression(*operand)?);
                     Ok(ExprLoc::new(self.convert_range(range), Expr::Not(operand)))
                 }
-                _ => Err(ParseError::Todo("UnaryOp other than Not")),
+                UnaryOp::USub => {
+                    let operand = Box::new(self.parse_expression(*operand)?);
+                    Ok(ExprLoc::new(self.convert_range(range), Expr::UnaryMinus(operand)))
+                }
+                _ => Err(ParseError::Todo("UnaryOp other than Not/USub")),
             },
             AstExpr::Lambda(_) => Err(ParseError::Todo("Lambda")),
             AstExpr::If(_) => Err(ParseError::Todo("IfExp")),
@@ -403,8 +408,8 @@ impl<'c> Parser<'c> {
                     )),
                 }
             }
-            AstExpr::FString(_) => Err(ParseError::Todo("FormattedValue")),
-            AstExpr::TString(_) => Err(ParseError::Todo("FormattedValue")),
+            AstExpr::FString(ast::ExprFString { value, range, .. }) => self.parse_fstring(value, range),
+            AstExpr::TString(_) => Err(ParseError::Todo("TString (template strings)")),
             AstExpr::StringLiteral(ast::ExprStringLiteral { value, range, .. }) => Ok(ExprLoc::new(
                 self.convert_range(range),
                 Expr::Literal(Literal::Str(value.to_string())),
@@ -504,6 +509,126 @@ impl<'c> Parser<'c> {
         Identifier::new(&self.code[range], self.convert_range(range))
     }
 
+    /// Parses an f-string value into expression parts.
+    ///
+    /// F-strings in ruff AST are represented as `FStringValue` containing
+    /// `FStringPart`s, which can be either literal strings or `FString`
+    /// interpolated sections. Each `FString` contains `InterpolatedStringElements`.
+    fn parse_fstring(&self, value: ast::FStringValue, range: TextRange) -> Result<ExprLoc<'c>, ParseError<'c>> {
+        let mut parts = Vec::new();
+
+        for fstring_part in &value {
+            match fstring_part {
+                ast::FStringPart::Literal(lit) => {
+                    // Literal string segment - use Cow to avoid allocation when possible
+                    let processed = lit.value.to_string();
+                    if !processed.is_empty() {
+                        let raw = &self.code[lit.range];
+                        let s = if raw == processed { raw.into() } else { processed.into() };
+                        parts.push(FStringPart::Literal(s));
+                    }
+                }
+                ast::FStringPart::FString(fstring) => {
+                    // Interpolated f-string section
+                    for element in &fstring.elements {
+                        let part = self.parse_fstring_element(element)?;
+                        parts.push(part);
+                    }
+                }
+            }
+        }
+
+        // Optimization: if only one literal part, return as simple string literal
+        if parts.len() == 1 {
+            if let FStringPart::Literal(s) = &parts[0] {
+                return Ok(ExprLoc::new(
+                    self.convert_range(range),
+                    Expr::Literal(Literal::Str(s.to_string())),
+                ));
+            }
+        }
+
+        Ok(ExprLoc::new(self.convert_range(range), Expr::FString(parts)))
+    }
+
+    /// Parses a single f-string element (literal or interpolation).
+    fn parse_fstring_element(&self, element: &InterpolatedStringElement) -> Result<FStringPart<'c>, ParseError<'c>> {
+        match element {
+            InterpolatedStringElement::Literal(lit) => {
+                // Use Cow to avoid allocation when possible
+                let processed = lit.value.to_string();
+                let raw = &self.code[lit.range];
+                let s = if raw == processed { raw.into() } else { processed.into() };
+                Ok(FStringPart::Literal(s))
+            }
+            InterpolatedStringElement::Interpolation(interp) => {
+                let expr = Box::new(self.parse_expression((*interp.expression).clone())?);
+                let conversion = convert_conversion_flag(interp.conversion);
+                let format_spec = match &interp.format_spec {
+                    Some(spec) => Some(self.parse_format_spec(spec)?),
+                    None => None,
+                };
+                Ok(FStringPart::Interpolation {
+                    expr,
+                    conversion,
+                    format_spec,
+                })
+            }
+        }
+    }
+
+    /// Parses a format specification, which may contain nested interpolations.
+    ///
+    /// For static specs (no interpolations), parses the format string into a
+    /// `ParsedFormatSpec` at parse time to avoid runtime parsing overhead.
+    fn parse_format_spec(&self, spec: &ast::InterpolatedStringFormatSpec) -> Result<FormatSpec<'c>, ParseError<'c>> {
+        let mut parts = Vec::new();
+        let mut has_interpolation = false;
+
+        for element in &spec.elements {
+            match element {
+                InterpolatedStringElement::Literal(lit) => {
+                    // Use Cow to avoid allocation when possible
+                    let processed = lit.value.to_string();
+                    let raw = &self.code[lit.range];
+                    let s = if raw == processed { raw.into() } else { processed.into() };
+                    parts.push(FStringPart::Literal(s));
+                }
+                InterpolatedStringElement::Interpolation(interp) => {
+                    has_interpolation = true;
+                    let expr = Box::new(self.parse_expression((*interp.expression).clone())?);
+                    let conversion = convert_conversion_flag(interp.conversion);
+                    // Format specs within format specs are not allowed in Python
+                    parts.push(FStringPart::Interpolation {
+                        expr,
+                        conversion,
+                        format_spec: None,
+                    });
+                }
+            }
+        }
+
+        if has_interpolation {
+            Ok(FormatSpec::Dynamic(parts))
+        } else {
+            // Combine all literal parts into a single static string and parse at parse time
+            let static_spec: String = parts
+                .into_iter()
+                .filter_map(|p| {
+                    if let FStringPart::Literal(s) = p {
+                        Some(s.into_owned())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let parsed = static_spec
+                .parse()
+                .map_err(|spec| ParseError::Parsing(format!("Invalid format specifier '{spec}'")))?;
+            Ok(FormatSpec::Static(parsed))
+        }
+    }
+
     fn convert_range(&self, range: TextRange) -> CodeRange<'c> {
         let start = range.start().into();
         let (start_line_no, start_line_start, start_line_end) = self.index_to_position(start);
@@ -587,6 +712,16 @@ fn convert_compare_op(op: CmpOp) -> CmpOperator {
         CmpOp::IsNot => CmpOperator::IsNot,
         CmpOp::In => CmpOperator::In,
         CmpOp::NotIn => CmpOperator::NotIn,
+    }
+}
+
+/// Converts ruff's ConversionFlag to our ConversionFlag.
+fn convert_conversion_flag(flag: RuffConversionFlag) -> ConversionFlag {
+    match flag {
+        RuffConversionFlag::None => ConversionFlag::None,
+        RuffConversionFlag::Str => ConversionFlag::Str,
+        RuffConversionFlag::Repr => ConversionFlag::Repr,
+        RuffConversionFlag::Ascii => ConversionFlag::Ascii,
     }
 }
 

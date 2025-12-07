@@ -6,6 +6,7 @@ use crate::args::ArgExprs;
 use crate::callable::Callable;
 use crate::exceptions::{ExcType, ExceptionRaise, SimpleException};
 use crate::expressions::{Expr, ExprLoc, Identifier, Literal, NameScope, Node};
+use crate::fstring::{FStringPart, FormatSpec};
 use crate::function::Function;
 use crate::operators::{CmpOperator, Operator};
 use crate::parse::ParseNode;
@@ -387,6 +388,14 @@ impl Prepare {
                 Expr::Dict(prepared_pairs)
             }
             Expr::Not(operand) => Expr::Not(Box::new(self.prepare_expression(*operand)?)),
+            Expr::UnaryMinus(operand) => Expr::UnaryMinus(Box::new(self.prepare_expression(*operand)?)),
+            Expr::FString(parts) => {
+                let prepared_parts = parts
+                    .into_iter()
+                    .map(|part| self.prepare_fstring_part(part))
+                    .collect::<Result<Vec<_>, ParseError<'c>>>()?;
+                Expr::FString(prepared_parts)
+            }
         };
 
         // Optimization: Transform `(x % n) == value` with any constant right-hand side into a
@@ -575,6 +584,36 @@ impl Prepare {
             Identifier::new_with_scope(ident.name, ident.position, id, NameScope::Local),
             is_new,
         )
+    }
+
+    /// Prepares an f-string part by resolving names in interpolated expressions.
+    fn prepare_fstring_part<'c>(&mut self, part: FStringPart<'c>) -> Result<FStringPart<'c>, ParseError<'c>> {
+        match part {
+            FStringPart::Literal(s) => Ok(FStringPart::Literal(s)),
+            FStringPart::Interpolation {
+                expr,
+                conversion,
+                format_spec,
+            } => {
+                let prepared_expr = Box::new(self.prepare_expression(*expr)?);
+                let prepared_spec = match format_spec {
+                    Some(FormatSpec::Static(s)) => Some(FormatSpec::Static(s)),
+                    Some(FormatSpec::Dynamic(parts)) => {
+                        let prepared = parts
+                            .into_iter()
+                            .map(|p| self.prepare_fstring_part(p))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Some(FormatSpec::Dynamic(prepared))
+                    }
+                    None => None,
+                };
+                Ok(FStringPart::Interpolation {
+                    expr: prepared_expr,
+                    conversion,
+                    format_spec: prepared_spec,
+                })
+            }
+        }
     }
 }
 

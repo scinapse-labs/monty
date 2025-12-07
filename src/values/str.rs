@@ -14,7 +14,7 @@ use crate::values::PyTrait;
 /// Python string value stored on the heap.
 ///
 /// Wraps a Rust `String` and provides Python-compatible operations.
-/// Note that `len()` returns the byte length, not the number of Unicode codepoints.
+/// `len()` returns the number of Unicode codepoints (characters), matching Python semantics.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Str(String);
 
@@ -69,7 +69,8 @@ impl<'c, 'e> PyTrait<'c, 'e> for Str {
     }
 
     fn py_len(&self, _heap: &Heap<'c, 'e>) -> Option<usize> {
-        Some(self.0.len())
+        // Count Unicode characters, not bytes, to match Python semantics
+        Some(self.0.chars().count())
     }
 
     fn py_eq(&self, other: &Self, _heap: &mut Heap<'c, 'e>) -> bool {

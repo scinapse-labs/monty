@@ -12,6 +12,10 @@ dev = [
 # https://beta.ruff.rs/docs/configuration/
 [tool.ruff]
 line-length = 120
+include = [
+    "scripts/**/*.py",
+    "test_cases/**/*.py",
+]
 
 [tool.ruff.lint]
 extend-select = [
@@ -28,6 +32,8 @@ isort = { combine-as-imports = true }
 mccabe = { max-complexity = 14 }
 ignore = [
     "F632", # ignore replace `is` with `==` - we have lots of these tests
+    "F811", # Redefinition of unused variable
+    "F541", # f-string without any placeholders
 ]
 
 [tool.ruff.lint.pydocstyle]

@@ -13,22 +13,36 @@ install: .cargo .pre-commit ## Install the package, dependencies, and pre-commit
 	cargo check
 	pre-commit install --install-hooks
 
-.PHONY: lint-rs
-lint-rs:  ## Lint Rust code with fmt and clippy
+.PHONY: format-rs
+format-rs:  ## Format Rust code with fmt
 	@cargo fmt --version
 	cargo fmt --all
+
+.PHONY: format-py
+format-py: ## Format Python code - WARNING be careful about this command as it may modify code and break tests silently!
+	uv run ruff format
+	uv run ruff check --fix --fix-only
+
+.PHONY: format
+format: format-rs ## Format Rust code, this does not format Python code as we have to be careful with that
+
+.PHONY: lint-rs
+lint-rs:  ## Lint Rust code with fmt and clippy
 	@cargo clippy --version
 	cargo clippy --tests --bench main -- -D warnings -A incomplete_features
 	cargo clippy --tests --all-features -- -D warnings -A incomplete_features
 
 .PHONY: lint-py
 lint-py: ## Lint Python code with ruff
-	uv run ruff format
-	uv run ruff check --fix --fix-only
+	uv run ruff format --check
+	uv run ruff check
 	uv run basedpyright
 
 .PHONY: lint
 lint: lint-rs lint-py ## Lint the code with ruff and clippy
+
+.PHONY: format-lint-rs
+format-lint-rs: format-rs lint-rs ## Format and lint Rust code with fmt and clippy
 
 .PHONY: test
 test: ## Run tests with dec-ref-check enabled

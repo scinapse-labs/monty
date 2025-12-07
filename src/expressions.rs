@@ -9,6 +9,8 @@ use crate::value::{Attr, Value};
 use crate::values::bytes::bytes_repr;
 use crate::values::str::string_repr;
 
+use crate::fstring::FStringPart;
+
 /// Indicates which namespace a variable reference belongs to.
 ///
 /// This is determined at prepare time based on Python's scoping rules:
@@ -105,6 +107,16 @@ pub(crate) enum Expr<'c> {
     Dict(Vec<(ExprLoc<'c>, ExprLoc<'c>)>),
     /// Unary `not` expression - evaluates to the boolean negation of the operand's truthiness.
     Not(Box<ExprLoc<'c>>),
+    /// Unary minus expression - negates a numeric value.
+    UnaryMinus(Box<ExprLoc<'c>>),
+    /// F-string expression containing literal and interpolated parts.
+    ///
+    /// At evaluation time, each part is processed in sequence:
+    /// - Literal parts are used directly
+    /// - Interpolation parts have their expression evaluated, converted, and formatted
+    ///
+    /// The results are concatenated to produce the final string.
+    FString(Vec<FStringPart<'c>>),
 }
 
 impl fmt::Display for Expr<'_> {
@@ -148,6 +160,27 @@ impl fmt::Display for Expr<'_> {
                 }
             }
             Self::Not(operand) => write!(f, "not {operand}"),
+            Self::UnaryMinus(operand) => write!(f, "-{operand}"),
+            Self::FString(parts) => {
+                f.write_str("f\"")?;
+                for part in parts {
+                    match part {
+                        FStringPart::Literal(s) => f.write_str(s)?,
+                        FStringPart::Interpolation {
+                            expr,
+                            conversion,
+                            format_spec,
+                        } => {
+                            write!(f, "{{{expr}{conversion}")?;
+                            if let Some(spec) = format_spec {
+                                write!(f, ":{spec}")?;
+                            }
+                            f.write_char('}')?;
+                        }
+                    }
+                }
+                f.write_char('"')
+            }
         }
     }
 }

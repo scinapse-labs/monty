@@ -16,7 +16,10 @@ Project goals:
 ## Build Commands
 
 ```bash
-# format code and run clippy
+# format python and rust code
+make format
+
+# lint python and rust code
 make lint
 
 # Build the project
@@ -90,9 +93,9 @@ You should prefer single quotes for strings in python tests.
 - `# skip=monty` - Skip Monty test (only run on CPython)
 - `# skip=monty,cpython` - Skip both (useful for temporarily disabling a test)
 
-Run `make lint-py` after adding tests to format them.
+Run `make lint-py` after adding tests to lint them, you may need to disable some linting rules by editing `pyproject.toml` to allow all syntax in the test files.
 
-Use make `make complete-tests` after adding tests with the expectations blank e.g. `# Return=` to fill in the expected value.
+Use `make complete-tests` after adding tests with the expectations blank e.g. `# Return=` to fill in the expected value.
 
 These tests are run via `datatest-stable` harness in `tests/datatest_runner.rs`.
 

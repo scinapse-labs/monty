@@ -35,7 +35,7 @@ pub trait PyTrait<'c, 'e> {
 
     /// Returns the number of elements in this container.
     ///
-    /// For strings, returns the number of bytes (not Unicode codepoints).
+    /// For strings, returns the number of Unicode codepoints (characters), matching Python.
     /// Returns `None` if the type doesn't support `len()`.
     fn py_len(&self, heap: &Heap<'c, 'e>) -> Option<usize>;
 

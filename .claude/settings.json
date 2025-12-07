@@ -16,7 +16,9 @@
       "Bash(cat:*)",
       "Bash(python3:*)",
       "Bash(git show:*)",
-      "Bash(git diff:*)"
+      "Bash(git diff:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh api:*)"
     ],
     "deny": [],
     "ask": []
