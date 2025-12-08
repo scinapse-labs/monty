@@ -137,6 +137,11 @@ impl<'c, 'e> PyTrait<'c, 'e> for Value<'c, 'e> {
             (Self::Bool(v1), Self::Bool(v2)) => v1 == v2,
             (Self::Bool(v1), Self::Int(v2)) => i64::from(*v1) == *v2,
             (Self::Int(v1), Self::Bool(v2)) => *v1 == i64::from(*v2),
+            (Self::Float(v1), Self::Float(v2)) => v1 == v2,
+            (Self::Int(v1), Self::Float(v2)) => (*v1 as f64) == *v2,
+            (Self::Float(v1), Self::Int(v2)) => *v1 == (*v2 as f64),
+            (Self::Bool(v1), Self::Float(v2)) => (i64::from(*v1) as f64) == *v2,
+            (Self::Float(v1), Self::Bool(v2)) => *v1 == (i64::from(*v2) as f64),
             (Self::None, Self::None) => true,
 
             (Self::InternString(s1), Self::InternString(s2)) => s1 == s2,
@@ -447,6 +452,358 @@ impl<'c, 'e> PyTrait<'c, 'e> for Value<'c, 'e> {
                 heap.with_entry_mut(*id, |heap, data| data.py_iadd(other, heap, Some(*id)))
             }
             _ => Ok(false),
+        }
+    }
+
+    fn py_mult<T: ResourceTracker>(
+        &self,
+        other: &Self,
+        heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        match (self, other) {
+            // Numeric multiplication
+            (Self::Int(a), Self::Int(b)) => {
+                // Use checked_mul to handle overflow, fall back to float
+                match a.checked_mul(*b) {
+                    Some(result) => Ok(Some(Value::Int(result))),
+                    None => Ok(Some(Value::Float(*a as f64 * *b as f64))),
+                }
+            }
+            (Self::Float(a), Self::Float(b)) => Ok(Some(Value::Float(a * b))),
+            (Self::Int(a), Self::Float(b)) => Ok(Some(Value::Float(*a as f64 * b))),
+            (Self::Float(a), Self::Int(b)) => Ok(Some(Value::Float(a * *b as f64))),
+
+            // Bool numeric multiplication (True=1, False=0)
+            (Self::Bool(a), Self::Int(b)) => {
+                let a_int = i64::from(*a);
+                Ok(Some(Value::Int(a_int * b)))
+            }
+            (Self::Int(a), Self::Bool(b)) => {
+                let b_int = i64::from(*b);
+                Ok(Some(Value::Int(a * b_int)))
+            }
+            (Self::Bool(a), Self::Float(b)) => {
+                let a_float = if *a { 1.0 } else { 0.0 };
+                Ok(Some(Value::Float(a_float * b)))
+            }
+            (Self::Float(a), Self::Bool(b)) => {
+                let b_float = if *b { 1.0 } else { 0.0 };
+                Ok(Some(Value::Float(a * b_float)))
+            }
+            (Self::Bool(a), Self::Bool(b)) => {
+                let result = i64::from(*a) * i64::from(*b);
+                Ok(Some(Value::Int(result)))
+            }
+
+            // String repetition: "ab" * 3 or 3 * "ab"
+            (Self::InternString(s), Self::Int(n)) | (Self::Int(n), Self::InternString(s)) => {
+                let count = i64_to_repeat_count(*n)?;
+                if count == 0 {
+                    Ok(Some(Value::InternString("")))
+                } else {
+                    let result = s.repeat(count);
+                    Ok(Some(Value::Ref(heap.allocate(HeapData::Str(result.into()))?)))
+                }
+            }
+
+            // Bytes repetition: b"ab" * 3 or 3 * b"ab"
+            (Self::InternBytes(b), Self::Int(n)) | (Self::Int(n), Self::InternBytes(b)) => {
+                let count = i64_to_repeat_count(*n)?;
+                if count == 0 {
+                    Ok(Some(Value::InternBytes(&[])))
+                } else {
+                    let result: Vec<u8> = b.repeat(count);
+                    Ok(Some(Value::Ref(heap.allocate(HeapData::Bytes(result.into()))?)))
+                }
+            }
+
+            // Heap string repetition: heap_str * int or int * heap_str
+            (Self::Ref(id), Self::Int(n)) | (Self::Int(n), Self::Ref(id)) => {
+                let count = i64_to_repeat_count(*n)?;
+                heap.mult_sequence(*id, count)
+            }
+
+            _ => Ok(None),
+        }
+    }
+
+    fn py_div<T: ResourceTracker>(
+        &self,
+        other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        match (self, other) {
+            // True division always returns float
+            // Note: int/int uses "division by zero", float cases use "float division by zero"
+            (Self::Int(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division().into())
+                } else {
+                    Ok(Some(Value::Float(*a as f64 / *b as f64)))
+                }
+            }
+            (Self::Float(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float().into())
+                } else {
+                    Ok(Some(Value::Float(a / b)))
+                }
+            }
+            (Self::Int(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float().into())
+                } else {
+                    Ok(Some(Value::Float(*a as f64 / b)))
+                }
+            }
+            (Self::Float(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division_float().into())
+                } else {
+                    Ok(Some(Value::Float(a / *b as f64)))
+                }
+            }
+            // Bool division (True=1, False=0)
+            (Self::Bool(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division().into())
+                } else {
+                    Ok(Some(Value::Float(f64::from(*a) / *b as f64)))
+                }
+            }
+            (Self::Int(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Float(*a as f64))) // a / 1 = a
+                } else {
+                    Err(ExcType::zero_division().into())
+                }
+            }
+            (Self::Bool(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float().into())
+                } else {
+                    Ok(Some(Value::Float(f64::from(*a) / b)))
+                }
+            }
+            (Self::Float(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Float(*a))) // a / 1.0 = a
+                } else {
+                    Err(ExcType::zero_division_float().into())
+                }
+            }
+            (Self::Bool(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Float(f64::from(*a)))) // a / 1 = a
+                } else {
+                    Err(ExcType::zero_division().into())
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn py_floordiv<T: ResourceTracker>(
+        &self,
+        other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        match (self, other) {
+            // Floor division: int // int returns int
+            (Self::Int(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division_int().into())
+                } else {
+                    // Python floor division rounds toward negative infinity
+                    // div_euclid doesn't match Python semantics, so compute manually
+                    let d = a / b;
+                    let r = a % b;
+                    // If there's a remainder and signs differ, round down (toward -∞)
+                    let result = if r != 0 && (*a < 0) != (*b < 0) { d - 1 } else { d };
+                    Ok(Some(Value::Int(result)))
+                }
+            }
+            // Float floor division returns float
+            (Self::Float(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float_floor().into())
+                } else {
+                    Ok(Some(Value::Float((a / b).floor())))
+                }
+            }
+            (Self::Int(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float_floor().into())
+                } else {
+                    Ok(Some(Value::Float((*a as f64 / b).floor())))
+                }
+            }
+            (Self::Float(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division_float_floor().into())
+                } else {
+                    Ok(Some(Value::Float((a / *b as f64).floor())))
+                }
+            }
+            // Bool floor division (True=1, False=0)
+            (Self::Bool(a), Self::Int(b)) => {
+                if *b == 0 {
+                    Err(ExcType::zero_division_int().into())
+                } else {
+                    let a_int = i64::from(*a);
+                    // Use same floor division logic as Int // Int
+                    let d = a_int / b;
+                    let r = a_int % b;
+                    let result = if r != 0 && (a_int < 0) != (*b < 0) { d - 1 } else { d };
+                    Ok(Some(Value::Int(result)))
+                }
+            }
+            (Self::Int(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Int(*a))) // a // 1 = a
+                } else {
+                    Err(ExcType::zero_division_int().into())
+                }
+            }
+            (Self::Bool(a), Self::Float(b)) => {
+                if *b == 0.0 {
+                    Err(ExcType::zero_division_float_floor().into())
+                } else {
+                    Ok(Some(Value::Float((f64::from(*a) / b).floor())))
+                }
+            }
+            (Self::Float(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Float(a.floor()))) // a // 1.0 = floor(a)
+                } else {
+                    Err(ExcType::zero_division_float_floor().into())
+                }
+            }
+            (Self::Bool(a), Self::Bool(b)) => {
+                if *b {
+                    Ok(Some(Value::Int(i64::from(*a)))) // a // 1 = a
+                } else {
+                    Err(ExcType::zero_division_int().into())
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn py_pow<T: ResourceTracker>(
+        &self,
+        other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        match (self, other) {
+            (Self::Int(base), Self::Int(exp)) => {
+                if *base == 0 && *exp < 0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else if *exp >= 0 {
+                    // Positive exponent: try to return int, fall back to float on overflow
+                    // Note: exp > u32::MAX would overflow, so we use float for large exponents
+                    if *exp <= i64::from(u32::MAX) {
+                        match base.checked_pow(*exp as u32) {
+                            Some(result) => Ok(Some(Value::Int(result))),
+                            None => Ok(Some(Value::Float((*base as f64).powf(*exp as f64)))),
+                        }
+                    } else {
+                        Ok(Some(Value::Float((*base as f64).powf(*exp as f64))))
+                    }
+                } else {
+                    // Negative exponent: return float
+                    // Use powi if exp fits in i32, otherwise use powf
+                    if let Ok(exp_i32) = i32::try_from(*exp) {
+                        Ok(Some(Value::Float((*base as f64).powi(exp_i32))))
+                    } else {
+                        Ok(Some(Value::Float((*base as f64).powf(*exp as f64))))
+                    }
+                }
+            }
+            (Self::Float(base), Self::Float(exp)) => {
+                if *base == 0.0 && *exp < 0.0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else {
+                    Ok(Some(Value::Float(base.powf(*exp))))
+                }
+            }
+            (Self::Int(base), Self::Float(exp)) => {
+                if *base == 0 && *exp < 0.0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else {
+                    Ok(Some(Value::Float((*base as f64).powf(*exp))))
+                }
+            }
+            (Self::Float(base), Self::Int(exp)) => {
+                if *base == 0.0 && *exp < 0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else if let Ok(exp_i32) = i32::try_from(*exp) {
+                    // Use powi if exp fits in i32
+                    Ok(Some(Value::Float(base.powi(exp_i32))))
+                } else {
+                    // Fall back to powf for exponents outside i32 range
+                    Ok(Some(Value::Float(base.powf(*exp as f64))))
+                }
+            }
+            // Bool power operations (True=1, False=0)
+            (Self::Bool(base), Self::Int(exp)) => {
+                let base_int = i64::from(*base);
+                if base_int == 0 && *exp < 0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else if *exp >= 0 {
+                    // Positive exponent: 1**n=1, 0**n=0 (for n>0), 0**0=1
+                    if *exp <= i64::from(u32::MAX) {
+                        match base_int.checked_pow(*exp as u32) {
+                            Some(result) => Ok(Some(Value::Int(result))),
+                            None => Ok(Some(Value::Float((base_int as f64).powf(*exp as f64)))),
+                        }
+                    } else {
+                        Ok(Some(Value::Float((base_int as f64).powf(*exp as f64))))
+                    }
+                } else {
+                    // Negative exponent: return float (1**-n=1.0)
+                    if let Ok(exp_i32) = i32::try_from(*exp) {
+                        Ok(Some(Value::Float((base_int as f64).powi(exp_i32))))
+                    } else {
+                        Ok(Some(Value::Float((base_int as f64).powf(*exp as f64))))
+                    }
+                }
+            }
+            (Self::Int(base), Self::Bool(exp)) => {
+                // n ** True = n, n ** False = 1
+                if *exp {
+                    Ok(Some(Value::Int(*base)))
+                } else {
+                    Ok(Some(Value::Int(1)))
+                }
+            }
+            (Self::Bool(base), Self::Float(exp)) => {
+                let base_float = f64::from(*base);
+                if base_float == 0.0 && *exp < 0.0 {
+                    Err(ExcType::zero_pow_negative().into())
+                } else {
+                    Ok(Some(Value::Float(base_float.powf(*exp))))
+                }
+            }
+            (Self::Float(base), Self::Bool(exp)) => {
+                // base ** True = base, base ** False = 1.0
+                if *exp {
+                    Ok(Some(Value::Float(*base)))
+                } else {
+                    Ok(Some(Value::Float(1.0)))
+                }
+            }
+            (Self::Bool(base), Self::Bool(exp)) => {
+                // True ** True = 1, True ** False = 1, False ** True = 0, False ** False = 1
+                let base_int = i64::from(*base);
+                let exp_int = i64::from(*exp);
+                if exp_int == 0 {
+                    Ok(Some(Value::Int(1))) // anything ** 0 = 1
+                } else {
+                    Ok(Some(Value::Int(base_int))) // base ** 1 = base
+                }
+            }
+            _ => Ok(None),
         }
     }
 
@@ -933,4 +1290,19 @@ fn callable_value_id(c: &Callable<'_>) -> usize {
     let mut hasher = DefaultHasher::new();
     std::mem::discriminant(c).hash(&mut hasher);
     CALLABLE_ID_TAG | (hasher.finish() as usize & CALLABLE_ID_MASK)
+}
+
+/// Converts an i64 repeat count to usize, handling negative values and overflow.
+///
+/// Returns 0 for negative values (Python treats negative repeat counts as 0).
+/// Returns `OverflowError` if the value exceeds `usize::MAX`.
+#[inline]
+fn i64_to_repeat_count<'c>(n: i64) -> RunResult<'c, usize> {
+    if n <= 0 {
+        Ok(0)
+    } else if n as u64 > usize::MAX as u64 {
+        Err(ExcType::overflow_repeat_count().into())
+    } else {
+        Ok(n as usize)
+    }
 }

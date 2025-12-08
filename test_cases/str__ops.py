@@ -39,3 +39,20 @@ assert str('hello') == 'hello', 'string str'
 
 assert repr('hello "world"') == '\'hello "world"\'', 'string with quotes repr'
 assert str('hello "world"') == 'hello "world"', 'string with quotes str'
+
+# === String repetition (*) ===
+assert 'ab' * 3 == 'ababab', 'str mult int'
+assert 3 * 'ab' == 'ababab', 'int mult str'
+assert 'x' * 0 == '', 'str mult zero'
+assert 'x' * -1 == '', 'str mult negative'
+assert '' * 5 == '', 'empty str mult'
+assert 'a' * 1 == 'a', 'str mult one'
+
+# === String repetition augmented assignment (*=) ===
+s = 'ab'
+s *= 3
+assert s == 'ababab', 'str imult'
+
+s = 'x'
+s *= 0
+assert s == '', 'str imult zero'

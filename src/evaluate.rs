@@ -292,6 +292,10 @@ where
             Operator::Add => lhs.py_add(&rhs, self.heap)?,
             Operator::Sub => lhs.py_sub(&rhs, self.heap)?,
             Operator::Mod => lhs.py_mod(&rhs),
+            Operator::Mult => lhs.py_mult(&rhs, self.heap)?,
+            Operator::Div => lhs.py_div(&rhs, self.heap)?,
+            Operator::FloorDiv => lhs.py_floordiv(&rhs, self.heap)?,
+            Operator::Pow => lhs.py_pow(&rhs, self.heap)?,
             _ => {
                 // Drop temporary references before early return
                 lhs.drop_with_heap(self.heap);

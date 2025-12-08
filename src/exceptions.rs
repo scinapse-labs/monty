@@ -34,6 +34,8 @@ pub enum ExcType {
     IndexError,
     SyntaxError,
     NotImplementedError,
+    ZeroDivisionError,
+    OverflowError,
 }
 
 impl ExcType {
@@ -263,6 +265,54 @@ impl ExcType {
     #[must_use]
     pub fn not_implemented<'c>(feature: &str) -> SimpleException<'c> {
         exc_fmt!(Self::NotImplementedError; "The monty syntax parser does not yet support {}", feature)
+    }
+
+    /// Creates a ZeroDivisionError for true division by zero (int / int case).
+    ///
+    /// Matches CPython's format: `ZeroDivisionError('division by zero')`
+    #[must_use]
+    pub fn zero_division<'c>() -> SimpleException<'c> {
+        exc_static!(Self::ZeroDivisionError; "division by zero")
+    }
+
+    /// Creates a ZeroDivisionError for float division by zero.
+    ///
+    /// Matches CPython's format: `ZeroDivisionError('float division by zero')`
+    #[must_use]
+    pub fn zero_division_float<'c>() -> SimpleException<'c> {
+        exc_static!(Self::ZeroDivisionError; "float division by zero")
+    }
+
+    /// Creates a ZeroDivisionError for integer division or modulo by zero.
+    ///
+    /// Matches CPython's format: `ZeroDivisionError('integer division or modulo by zero')`
+    #[must_use]
+    pub fn zero_division_int<'c>() -> SimpleException<'c> {
+        exc_static!(Self::ZeroDivisionError; "integer division or modulo by zero")
+    }
+
+    /// Creates a ZeroDivisionError for float floor division by zero.
+    ///
+    /// Matches CPython's format: `ZeroDivisionError('float floor division by zero')`
+    #[must_use]
+    pub fn zero_division_float_floor<'c>() -> SimpleException<'c> {
+        exc_static!(Self::ZeroDivisionError; "float floor division by zero")
+    }
+
+    /// Creates a ZeroDivisionError for 0 raised to a negative power.
+    ///
+    /// Matches CPython's format: `ZeroDivisionError('0.0 cannot be raised to a negative power')`
+    #[must_use]
+    pub fn zero_pow_negative<'c>() -> SimpleException<'c> {
+        exc_static!(Self::ZeroDivisionError; "0.0 cannot be raised to a negative power")
+    }
+
+    /// Creates an OverflowError for string/sequence repetition with count too large.
+    ///
+    /// Matches CPython's format: `OverflowError('cannot fit 'int' into an index-sized integer')`
+    #[must_use]
+    pub fn overflow_repeat_count<'c>() -> SimpleException<'c> {
+        exc_static!(Self::OverflowError; "cannot fit 'int' into an index-sized integer")
     }
 }
 

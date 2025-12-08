@@ -48,3 +48,21 @@ assert str([]) == '[]', 'empty list str'
 
 assert repr([1, 2, 3]) == '[1, 2, 3]', 'list repr'
 assert str([1, 2, 3]) == '[1, 2, 3]', 'list str'
+
+# === List repetition (*) ===
+assert [1, 2] * 3 == [1, 2, 1, 2, 1, 2], 'list mult int'
+assert 3 * [1, 2] == [1, 2, 1, 2, 1, 2], 'int mult list'
+assert [1] * 0 == [], 'list mult zero'
+assert [1] * -1 == [], 'list mult negative'
+assert [] * 5 == [], 'empty list mult'
+assert [1, 2] * 1 == [1, 2], 'list mult one'
+assert [[1]] * 2 == [[1], [1]], 'nested list mult'
+
+# === List repetition augmented assignment (*=) ===
+lst = [1, 2]
+lst *= 2
+assert lst == [1, 2, 1, 2], 'list imult'
+
+lst = [1]
+lst *= 0
+assert lst == [], 'list imult zero'

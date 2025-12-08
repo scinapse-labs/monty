@@ -162,6 +162,57 @@ pub trait PyTrait<'c, 'e> {
         Ok(false)
     }
 
+    /// Python multiplication (`__mul__`).
+    ///
+    /// Returns `Ok(None)` if the operation is not supported for these types.
+    /// For numeric types: Int * Int, Float * Float, Int * Float, etc.
+    /// For sequences: str * int, list * int for repetition.
+    fn py_mult<T: ResourceTracker>(
+        &self,
+        _other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        Ok(None)
+    }
+
+    /// Python true division (`__truediv__`).
+    ///
+    /// Always returns float for numeric types. Returns `Ok(None)` if not supported.
+    /// Returns `Err(ZeroDivisionError)` for division by zero.
+    fn py_div<T: ResourceTracker>(
+        &self,
+        _other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        Ok(None)
+    }
+
+    /// Python floor division (`__floordiv__`).
+    ///
+    /// Returns int for int//int, float for float operations.
+    /// Returns `Ok(None)` if not supported.
+    /// Returns `Err(ZeroDivisionError)` for division by zero.
+    fn py_floordiv<T: ResourceTracker>(
+        &self,
+        _other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        Ok(None)
+    }
+
+    /// Python power (`__pow__`).
+    ///
+    /// Int ** positive_int returns int, int ** negative_int returns float.
+    /// Returns `Ok(None)` if not supported.
+    /// Returns `Err(ZeroDivisionError)` for 0 ** negative.
+    fn py_pow<T: ResourceTracker>(
+        &self,
+        _other: &Self,
+        _heap: &mut Heap<'c, 'e, T>,
+    ) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        Ok(None)
+    }
+
     /// Calls an attribute method on this value (e.g., `list.append()`).
     ///
     /// Returns an error if the attribute doesn't exist or the arguments are invalid.

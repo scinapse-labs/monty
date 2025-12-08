@@ -295,7 +295,7 @@ impl<'c> RunFrame<'c> {
         'c: 'e,
     {
         let rhs = self.execute_expr(namespaces, heap, expr)?;
-        // Capture rhs type before it's consumed by py_iadd
+        // Capture rhs type before it's consumed
         let rhs_type = rhs.py_type(Some(heap));
 
         // Cell variables need special handling - read through cell, modify, write back
@@ -305,27 +305,150 @@ impl<'c> RunFrame<'c> {
                 panic!("Cell variable slot doesn't contain a cell reference - prepare-time bug")
             };
             let mut cell_value = heap.get_cell_value(cell_id);
-            let ok = match op {
-                Operator::Add => cell_value.py_iadd(rhs, heap, None)?,
+            // Capture type before potential drop
+            let cell_value_type = cell_value.py_type(Some(heap));
+            let result: RunResult<'c, Option<Value<'c, 'e>>> = match op {
+                // In-place add has special optimization for mutable types
+                Operator::Add => {
+                    let ok = cell_value.py_iadd(rhs, heap, None)?;
+                    if ok {
+                        Ok(Some(cell_value))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                // For other operators, use binary op + replace
+                Operator::Mult => {
+                    let new_val = cell_value.py_mult(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
+                Operator::Div => {
+                    let new_val = cell_value.py_div(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
+                Operator::FloorDiv => {
+                    let new_val = cell_value.py_floordiv(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
+                Operator::Pow => {
+                    let new_val = cell_value.py_pow(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
+                Operator::Sub => {
+                    let new_val = cell_value.py_sub(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
+                Operator::Mod => {
+                    let new_val = cell_value.py_mod(&rhs);
+                    rhs.drop_with_heap(heap);
+                    cell_value.drop_with_heap(heap);
+                    Ok(new_val)
+                }
                 _ => return internal_err!(InternalRunError::TodoError; "Assign operator {op:?} not yet implemented"),
             };
-            if ok {
-                heap.set_cell_value(cell_id, cell_value);
-                None
-            } else {
-                Some(cell_value.py_type(Some(heap)))
+            match result? {
+                Some(new_value) => {
+                    heap.set_cell_value(cell_id, new_value);
+                    None
+                }
+                None => Some(cell_value_type),
             }
         } else {
             // Direct access for Local/Global scopes
             let target_val = namespaces.get_var_mut(self.local_idx, target)?;
-            let ok = match op {
-                Operator::Add => target_val.py_iadd(rhs, heap, None)?,
+            let target_type = target_val.py_type(Some(heap));
+            let result: RunResult<'c, Option<()>> = match op {
+                // In-place add has special optimization for mutable types
+                Operator::Add => {
+                    let ok = target_val.py_iadd(rhs, heap, None)?;
+                    if ok {
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                // For other operators, use binary op + replace
+                Operator::Mult => {
+                    let new_val = target_val.py_mult(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Operator::Div => {
+                    let new_val = target_val.py_div(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Operator::FloorDiv => {
+                    let new_val = target_val.py_floordiv(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Operator::Pow => {
+                    let new_val = target_val.py_pow(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Operator::Sub => {
+                    let new_val = target_val.py_sub(&rhs, heap)?;
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Operator::Mod => {
+                    let new_val = target_val.py_mod(&rhs);
+                    rhs.drop_with_heap(heap);
+                    if let Some(v) = new_val {
+                        let old = std::mem::replace(target_val, v);
+                        old.drop_with_heap(heap);
+                        Ok(Some(()))
+                    } else {
+                        Ok(None)
+                    }
+                }
                 _ => return internal_err!(InternalRunError::TodoError; "Assign operator {op:?} not yet implemented"),
             };
-            if ok {
-                None
-            } else {
-                Some(target_val.py_type(Some(heap)))
+            match result? {
+                Some(()) => None,
+                None => Some(target_type),
             }
         };
 

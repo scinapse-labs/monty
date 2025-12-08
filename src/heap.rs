@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use ahash::AHashSet;
 
 use crate::args::ArgValues;
+use crate::exceptions::ExcType;
 use crate::resource::{ResourceError, ResourceTracker};
 use crate::run::RunResult;
 use crate::value::{Attr, Value};
@@ -790,6 +791,142 @@ impl<'c, 'e, T: ResourceTracker> Heap<'c, 'e, T> {
         };
 
         success
+    }
+
+    /// Multiplies (repeats) a sequence by an integer count.
+    ///
+    /// This method handles sequence repetition for Python's `*` operator when applied
+    /// to sequences (str, bytes, list, tuple). It creates a new heap-allocated sequence
+    /// with the elements repeated `count` times.
+    ///
+    /// # Arguments
+    /// * `id` - HeapId of the sequence to repeat
+    /// * `count` - Number of times to repeat (0 returns empty sequence)
+    ///
+    /// # Returns
+    /// * `Ok(Some(Value))` - The new repeated sequence
+    /// * `Ok(None)` - If the heap entry is not a sequence type
+    /// * `Err` - If allocation fails due to resource limits
+    pub fn mult_sequence(&mut self, id: HeapId, count: usize) -> RunResult<'c, Option<Value<'c, 'e>>> {
+        // Take the data out to avoid borrow conflicts
+        let data = take_data!(self, id, "mult_sequence");
+
+        let result = match &data {
+            HeapData::Str(s) => {
+                if count == 0 {
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::InternString("")))
+                } else {
+                    let repeated = s.as_str().repeat(count);
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::Ref(self.allocate(HeapData::Str(repeated.into()))?)))
+                }
+            }
+            HeapData::Bytes(b) => {
+                if count == 0 {
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::InternBytes(&[])))
+                } else {
+                    let repeated = b.as_slice().repeat(count);
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::Ref(self.allocate(HeapData::Bytes(repeated.into()))?)))
+                }
+            }
+            HeapData::List(list) => {
+                if count == 0 {
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::Ref(self.allocate(HeapData::List(List::new(Vec::new())))?)))
+                } else {
+                    // Copy items and track which refs need incrementing
+                    let items: Vec<Value<'c, 'e>> = list.as_vec().iter().map(Value::copy_for_extend).collect();
+                    let ref_ids: Vec<HeapId> = items
+                        .iter()
+                        .filter_map(|v| if let Value::Ref(id) = v { Some(*id) } else { None })
+                        .collect();
+                    let original_len = items.len();
+
+                    // Restore data before heap operations
+                    restore_data!(self, id, data, "mult_sequence");
+
+                    // Now increment refcounts for each copy we'll make
+                    // We need (count) copies of each ref
+                    for ref_id in &ref_ids {
+                        for _ in 0..count {
+                            self.inc_ref(*ref_id);
+                        }
+                    }
+
+                    // Build the repeated list with overflow check
+                    let capacity = original_len
+                        .checked_mul(count)
+                        .ok_or_else(ExcType::overflow_repeat_count)?;
+                    let mut result = Vec::with_capacity(capacity);
+                    for _ in 0..count {
+                        for item in &items {
+                            result.push(item.copy_for_extend());
+                        }
+                    }
+
+                    // Manually forget the items vec to avoid Drop panic
+                    // The values have been copied to result with proper refcounts
+                    std::mem::forget(items);
+
+                    Ok(Some(Value::Ref(self.allocate(HeapData::List(List::new(result)))?)))
+                }
+            }
+            HeapData::Tuple(tuple) => {
+                if count == 0 {
+                    restore_data!(self, id, data, "mult_sequence");
+                    Ok(Some(Value::Ref(
+                        self.allocate(HeapData::Tuple(Tuple::from_vec(Vec::new())))?,
+                    )))
+                } else {
+                    // Copy items and track which refs need incrementing
+                    let items: Vec<Value<'c, 'e>> = tuple.as_vec().iter().map(Value::copy_for_extend).collect();
+                    let ref_ids: Vec<HeapId> = items
+                        .iter()
+                        .filter_map(|v| if let Value::Ref(id) = v { Some(*id) } else { None })
+                        .collect();
+                    let original_len = items.len();
+
+                    // Restore data before heap operations
+                    restore_data!(self, id, data, "mult_sequence");
+
+                    // Now increment refcounts for each copy we'll make
+                    // We need (count) copies of each ref
+                    for ref_id in &ref_ids {
+                        for _ in 0..count {
+                            self.inc_ref(*ref_id);
+                        }
+                    }
+
+                    // Build the repeated tuple with overflow check
+                    let capacity = original_len
+                        .checked_mul(count)
+                        .ok_or_else(ExcType::overflow_repeat_count)?;
+                    let mut result = Vec::with_capacity(capacity);
+                    for _ in 0..count {
+                        for item in &items {
+                            result.push(item.copy_for_extend());
+                        }
+                    }
+
+                    // Manually forget the items vec to avoid Drop panic
+                    std::mem::forget(items);
+
+                    Ok(Some(Value::Ref(
+                        self.allocate(HeapData::Tuple(Tuple::from_vec(result)))?,
+                    )))
+                }
+            }
+            HeapData::Dict(_) | HeapData::Cell(_) => {
+                // Dicts and Cells don't support multiplication
+                restore_data!(self, id, data, "mult_sequence");
+                Ok(None)
+            }
+        };
+
+        result
     }
 
     /// Runs mark-sweep garbage collection to free unreachable cycles.
