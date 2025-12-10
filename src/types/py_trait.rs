@@ -18,7 +18,7 @@ use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
 use crate::value::{Attr, Value};
 
 /// Common operations for heap-allocated Python values.

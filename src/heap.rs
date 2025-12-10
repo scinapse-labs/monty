@@ -9,10 +9,9 @@ use crate::args::ArgValues;
 use crate::exceptions::ExcType;
 use crate::intern::{FunctionId, Interns};
 use crate::resource::{ResourceError, ResourceTracker};
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
+use crate::types::{Bytes, Dict, List, PyTrait, Str, Tuple};
 use crate::value::{Attr, Value};
-use crate::values::PyTrait;
-use crate::values::{Bytes, Dict, List, Str, Tuple};
 
 /// Unique identifier for values stored inside the heap arena.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

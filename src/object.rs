@@ -15,8 +15,7 @@ use crate::{
     heap::{Heap, HeapData, HeapId},
     intern::Interns,
     resource::ResourceTracker,
-    value::Value,
-    values::{
+    types::{
         bytes::{bytes_repr, Bytes},
         dict::Dict,
         list::List,
@@ -24,6 +23,7 @@ use crate::{
         tuple::Tuple,
         PyTrait,
     },
+    value::Value,
 };
 
 /// A Python value that can be passed to or returned from the interpreter.

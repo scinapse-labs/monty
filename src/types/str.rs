@@ -10,8 +10,8 @@ use ahash::AHashSet;
 use crate::heap::{Heap, HeapData, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
+use crate::types::PyTrait;
 use crate::value::Value;
-use crate::values::PyTrait;
 
 /// Python string value stored on the heap.
 ///

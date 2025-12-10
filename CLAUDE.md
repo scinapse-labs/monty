@@ -45,6 +45,9 @@ Only add examples to docstrings of public functions and structs.
 
 The only exception is trait implementation methods where a docstring is not necessary if the method is self-explanatory.
 
+If you add example code to docstrings, it must be run in tests. Generally you should only add code examples to docstrings
+of public methods and structs. NEVER add examples that are ignored.
+
 Similarly, you should add lots of comments to code.
 
 If you see a comment or docstring that's out of date - you MUST update it to be correct.

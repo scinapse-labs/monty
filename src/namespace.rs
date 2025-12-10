@@ -3,7 +3,7 @@ use crate::expressions::{Identifier, NameScope};
 use crate::heap::{Heap, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
 use crate::value::Value;
 
 /// Unique identifier for values stored inside the namespace.

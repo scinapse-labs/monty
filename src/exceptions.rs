@@ -9,16 +9,15 @@ use strum::{Display, EnumString, IntoStaticStr};
 use crate::args::ArgValues;
 use crate::expressions::ExprLoc;
 
-use crate::heap::HeapData;
+use crate::heap::{Heap, HeapData};
 use crate::intern::{Interns, StringId};
 use crate::operators::{CmpOperator, Operator};
 use crate::parse::CodeRange;
 use crate::resource::{ResourceError, ResourceTracker};
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
+use crate::types::str::string_repr;
+use crate::types::PyTrait;
 use crate::value::{Attr, Value};
-use crate::values::str::string_repr;
-use crate::values::PyTrait;
-use crate::Heap;
 
 /// Python exception types supported by the interpreter.
 ///

@@ -7,9 +7,9 @@ use crate::{
     intern::Interns,
     namespace::{NamespaceId, Namespaces},
     resource::ResourceTracker,
-    run::RunResult,
+    run_frame::RunResult,
+    types::PyTrait,
     value::Value,
-    values::PyTrait,
 };
 
 /// Target of a function call expression.

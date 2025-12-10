@@ -16,10 +16,10 @@ use crate::heap::HeapData;
 use crate::heap::{Heap, HeapId};
 use crate::intern::{BytesId, FunctionId, Interns, StringId};
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
-use crate::values::bytes::bytes_repr_fmt;
-use crate::values::str::string_repr_fmt;
-use crate::values::PyTrait;
+use crate::run_frame::RunResult;
+use crate::types::bytes::bytes_repr_fmt;
+use crate::types::str::string_repr_fmt;
+use crate::types::PyTrait;
 
 /// Primary value type representing Python objects at runtime.
 ///

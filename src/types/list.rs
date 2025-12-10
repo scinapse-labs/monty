@@ -8,9 +8,9 @@ use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapData, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
+use crate::types::PyTrait;
 use crate::value::{Attr, Value};
-use crate::values::PyTrait;
 
 /// Python list type, wrapping a Vec of Values.
 ///

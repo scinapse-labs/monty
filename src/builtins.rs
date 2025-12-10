@@ -13,9 +13,9 @@ use crate::exceptions::{exc_err_fmt, ExcType};
 use crate::heap::{Heap, HeapData};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
+use crate::types::PyTrait;
 use crate::value::Value;
-use crate::values::PyTrait;
 
 /// Enumerates every interpreter-native Python builtins
 ///

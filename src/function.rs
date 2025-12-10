@@ -8,7 +8,7 @@ use crate::{
     intern::{Interns, StringId},
     namespace::{NamespaceId, Namespaces},
     resource::ResourceTracker,
-    run::{RunFrame, RunResult},
+    run_frame::{RunFrame, RunResult},
     value::Value,
 };
 

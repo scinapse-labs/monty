@@ -10,8 +10,8 @@ use crate::namespace::{NamespaceId, Namespaces, GLOBAL_NS_IDX};
 use crate::operators::Operator;
 use crate::parse::CodeRange;
 use crate::resource::ResourceTracker;
+use crate::types::PyTrait;
 use crate::value::Value;
-use crate::values::PyTrait;
 
 /// Result type for runtime operations.
 pub type RunResult<T> = Result<T, RunError>;

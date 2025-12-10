@@ -12,10 +12,10 @@ use crate::exceptions::ExcType;
 use crate::heap::{Heap, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::run::RunResult;
+use crate::run_frame::RunResult;
+use crate::types::list::repr_sequence_fmt;
+use crate::types::PyTrait;
 use crate::value::Value;
-use crate::values::list::repr_sequence_fmt;
-use crate::values::PyTrait;
 
 /// Python tuple value stored on the heap.
 ///

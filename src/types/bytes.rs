@@ -9,7 +9,7 @@ use ahash::AHashSet;
 use crate::heap::{Heap, HeapId};
 use crate::intern::Interns;
 use crate::resource::ResourceTracker;
-use crate::values::PyTrait;
+use crate::types::PyTrait;
 
 /// Python bytes value stored on the heap.
 ///
