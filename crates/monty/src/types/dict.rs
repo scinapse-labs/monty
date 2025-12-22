@@ -84,7 +84,7 @@ impl Dict {
         heap: &mut Heap<impl ResourceTracker>,
         interns: &Interns,
     ) -> RunResult<Option<Value>> {
-        let Some(hash) = key.py_hash_u64(heap, interns) else {
+        let Some(hash) = key.py_hash(heap, interns) else {
             // Key is unhashable - clean up before returning error
             let err = ExcType::type_error_unhashable(key.py_type(Some(heap)));
             key.drop_with_heap(heap);
@@ -130,7 +130,7 @@ impl Dict {
         interns: &Interns,
     ) -> RunResult<Option<&Value>> {
         let hash = key
-            .py_hash_u64(heap, interns)
+            .py_hash(heap, interns)
             .ok_or_else(|| ExcType::type_error_unhashable(key.py_type(Some(heap))))?;
         if let Some(bucket) = self.map.get(&hash) {
             for (k, v) in bucket {
@@ -159,7 +159,7 @@ impl Dict {
         interns: &Interns,
     ) -> RunResult<Option<Value>> {
         let hash = key
-            .py_hash_u64(heap, interns)
+            .py_hash(heap, interns)
             .ok_or_else(|| ExcType::type_error_unhashable(key.py_type(Some(heap))))?;
 
         let bucket = self.map.entry(hash).or_default();
@@ -196,7 +196,7 @@ impl Dict {
         interns: &Interns,
     ) -> RunResult<Option<(Value, Value)>> {
         let hash = key
-            .py_hash_u64(heap, interns)
+            .py_hash(heap, interns)
             .ok_or_else(|| ExcType::type_error_unhashable(key.py_type(Some(heap))))?;
 
         if let Some(bucket) = self.map.get_mut(&hash) {

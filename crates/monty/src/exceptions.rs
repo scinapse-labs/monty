@@ -1,7 +1,5 @@
 use std::borrow::Cow;
-use std::collections::hash_map::DefaultHasher;
 use std::fmt::{self, Write};
-use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, IntoStaticStr};
@@ -535,7 +533,7 @@ impl ExcType {
 ///
 /// This is used for performance reasons for common exception patterns.
 /// Exception messages use `String` for owned storage.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct SimpleException {
     exc_type: ExcType,
     arg: Option<String>,
@@ -591,17 +589,6 @@ impl SimpleException {
         }
 
         f.write_char(')')
-    }
-
-    /// Computes a hash for this exception based on its type and argument.
-    ///
-    /// Used when exceptions are used as dict keys (rare but supported).
-    #[must_use]
-    pub fn py_hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.exc_type.hash(&mut hasher);
-        self.arg.hash(&mut hasher);
-        hasher.finish()
     }
 
     pub(crate) fn with_frame(self, frame: StackFrame) -> ExceptionRaise {

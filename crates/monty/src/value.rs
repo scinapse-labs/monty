@@ -888,82 +888,47 @@ impl Value {
     ///
     /// The `interns` parameter is needed for InternString/InternBytes to look up
     /// their actual content and hash it consistently with equivalent heap Str/Bytes.
-    pub fn py_hash_u64(&self, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Option<u64> {
+    pub fn py_hash(&self, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Option<u64> {
+        // strings bytes and heap allocated values have their own hashing logic
         match self {
-            // Immediate values can be hashed directly
-            Self::Undefined => Some(0),
-            Self::Ellipsis => Some(1),
-            Self::None => Some(2),
-            Self::Bool(b) => {
-                let mut hasher = DefaultHasher::new();
-                b.hash(&mut hasher);
-                Some(hasher.finish())
-            }
-            Self::Int(i) => {
-                let mut hasher = DefaultHasher::new();
-                i.hash(&mut hasher);
-                Some(hasher.finish())
-            }
-            Self::Float(f) => {
-                let mut hasher = DefaultHasher::new();
-                // Hash the bit representation of float for consistency
-                f.to_bits().hash(&mut hasher);
-                Some(hasher.finish())
-            }
-            Self::Range(range) => {
-                let mut hasher = DefaultHasher::new();
-                range.hash(&mut hasher);
-                Some(hasher.finish())
-            }
-            Self::Exc(e) => {
-                // Exceptions are rarely used as dict keys, but we provide a hash
-                // based on the exception type and argument for proper distribution
-                Some(e.py_hash())
-            }
-            Self::Builtin(b) => {
-                // Hash based on discriminant - same callable type gets same hash
-                let mut hasher = DefaultHasher::new();
-                discriminant(b).hash(&mut hasher);
-                match b {
-                    Builtins::Function(b) => discriminant(b).hash(&mut hasher),
-                    Builtins::ExcType(exc) => discriminant(exc).hash(&mut hasher),
-                    Builtins::Type(t) => discriminant(t).hash(&mut hasher),
-                }
-                Some(hasher.finish())
-            }
-            Self::Function(f_id) => {
-                // Hash based on function ID
-                let mut hasher = DefaultHasher::new();
-                "function".hash(&mut hasher);
-                f_id.hash(&mut hasher);
-                Some(hasher.finish())
-            }
-            Self::ExtFunction(f_id) => {
-                // Hash based on function ID
-                let mut hasher = DefaultHasher::new();
-                "ext-function".hash(&mut hasher);
-                f_id.hash(&mut hasher);
-                Some(hasher.finish())
-            }
+            // Hash just the actual string or bytes content for consistency with heap Str/Bytes
+            // hence we don't include the discriminant
             Self::InternString(string_id) => {
-                // Hash actual string content for consistency with heap Str
-                let s = interns.get_str(*string_id);
                 let mut hasher = DefaultHasher::new();
-                s.hash(&mut hasher);
-                Some(hasher.finish())
+                interns.get_str(*string_id).hash(&mut hasher);
+                return Some(hasher.finish());
             }
             Self::InternBytes(bytes_id) => {
-                // Hash actual bytes content for consistency with heap Bytes
-                let b = interns.get_bytes(*bytes_id);
                 let mut hasher = DefaultHasher::new();
-                b.hash(&mut hasher);
-                Some(hasher.finish())
+                interns.get_bytes(*bytes_id).hash(&mut hasher);
+                return Some(hasher.finish());
             }
             // For heap-allocated values, compute hash lazily and cache it
-            Self::Ref(id) => heap.get_or_compute_hash(*id, interns),
+            Self::Ref(id) => return heap.get_or_compute_hash(*id, interns),
+            _ => {}
+        }
+
+        let mut hasher = DefaultHasher::new();
+        // hash based on discriminant to avoid collisions with different types
+        discriminant(self).hash(&mut hasher);
+        match self {
+            // Immediate values can be hashed directly
+            Self::Undefined | Self::Ellipsis | Self::None => {}
+            Self::Bool(b) => b.hash(&mut hasher),
+            Self::Int(i) => i.hash(&mut hasher),
+            // Hash the bit representation of float for consistency
+            Self::Float(f) => f.to_bits().hash(&mut hasher),
+            Self::Range(range) => range.hash(&mut hasher),
+            Self::Exc(e) => e.hash(&mut hasher),
+            Self::Builtin(b) => b.hash(&mut hasher),
+            // Hash functions based on function ID
+            Self::Function(f_id) => f_id.hash(&mut hasher),
+            Self::ExtFunction(f_id) => f_id.hash(&mut hasher),
+            Self::InternString(_) | Self::InternBytes(_) | Self::Ref(_) => unreachable!("covered above"),
             #[cfg(feature = "dec-ref-check")]
             Self::Dereferenced => panic!("Cannot access Dereferenced object"),
         }
+        Some(hasher.finish())
     }
 
     /// TODO maybe replace with TryFrom
@@ -1311,8 +1276,10 @@ fn range_value_id(range: &Range) -> usize {
 /// Computes a deterministic ID for an exception based on its hash.
 #[inline]
 fn exc_value_id(exc: &SimpleException) -> usize {
-    let hash = exc.py_hash() as usize;
-    EXC_ID_TAG | (hash & EXC_ID_MASK)
+    let mut hasher = DefaultHasher::new();
+    exc.hash(&mut hasher);
+    let hash = hasher.finish();
+    EXC_ID_TAG | (hash as usize & EXC_ID_MASK)
 }
 
 /// Computes a deterministic ID for a builtin based on its discriminant.

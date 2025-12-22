@@ -3,6 +3,7 @@
 //! These tests verify that `PyObject` inputs are correctly converted to `Object`
 //! and can be used in Python code execution.
 
+use indexmap::IndexMap;
 use monty::{exceptions::ExcType, Executor, PyObject, RunError};
 
 // === Immediate Value Tests ===
@@ -117,8 +118,6 @@ fn input_tuple() {
 
 #[test]
 fn input_dict() {
-    use indexmap::IndexMap;
-
     let mut map = IndexMap::new();
     map.insert(PyObject::String("a".to_string()), PyObject::Int(1));
 
@@ -133,8 +132,6 @@ fn input_dict() {
 
 #[test]
 fn input_dict_get() {
-    use indexmap::IndexMap;
-
     let mut map = IndexMap::new();
     map.insert(PyObject::String("key".to_string()), PyObject::Int(42));
 

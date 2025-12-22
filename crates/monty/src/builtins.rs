@@ -19,7 +19,7 @@ use crate::value::Value;
 ///
 /// Uses strum derives for automatic `Display`, `FromStr`, and `AsRef<str>` implementations.
 /// All variants serialize to lowercase (e.g., `Print` -> "print").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Builtins {
     /// A builtin function like `print`, `len`, `type`, etc.
     Function(BuiltinsFunctions),
@@ -91,7 +91,7 @@ impl FromStr for Builtins {
 ///
 /// Uses strum derives for automatic `Display`, `FromStr`, and `IntoStaticStr` implementations.
 /// All variants serialize to lowercase (e.g., `Print` -> "print").
-#[derive(Debug, Clone, Copy, Display, EnumString, IntoStaticStr, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Display, EnumString, IntoStaticStr, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "lowercase")]
 pub enum BuiltinsFunctions {
     Print,
@@ -152,7 +152,7 @@ impl BuiltinsFunctions {
             }
             Self::Hash => {
                 let value = args.get_one_arg("hash")?;
-                let result = match value.py_hash_u64(heap, interns) {
+                let result = match value.py_hash(heap, interns) {
                     Some(hash) => Ok(Value::Int(hash as i64)),
                     None => Err(ExcType::type_error_unhashable(value.py_type(Some(heap)))),
                 };

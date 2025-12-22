@@ -86,7 +86,7 @@ impl HeapData {
                 // Tuple is hashable only if all elements are hashable
                 let mut hasher = DefaultHasher::new();
                 for obj in t.as_vec() {
-                    match obj.py_hash_u64(heap, interns) {
+                    match obj.py_hash(heap, interns) {
                         Some(h) => h.hash(&mut hasher),
                         None => return None, // Contains unhashable element
                     }
