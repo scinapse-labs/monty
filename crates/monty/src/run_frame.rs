@@ -14,7 +14,7 @@ use crate::parse::{CodeRange, ExceptHandler, Try};
 use crate::resource::ResourceTracker;
 use crate::snapshot::{AbstractSnapshotTracker, ClauseState, FrameExit, TryClauseState, TryPhase};
 use crate::types::PyTrait;
-use crate::value::Value;
+use crate::value::{Attr, Value};
 
 /// Result type for runtime operations.
 pub type RunResult<T> = Result<T, RunError>;
@@ -223,6 +223,16 @@ impl<'i, P: AbstractSnapshotTracker, W: PrintWriter> RunFrame<'i, P, W> {
             }
             Node::SubscriptAssign { target, index, value } => {
                 if let Some(exit) = self.subscript_assign(namespaces, heap, target, index, value)? {
+                    return Ok(Some(exit));
+                }
+            }
+            Node::AttrAssign {
+                object,
+                attr,
+                target_position,
+                value,
+            } => {
+                if let Some(exit) = self.attr_assign(namespaces, heap, object, attr, *target_position, value)? {
                     return Ok(Some(exit));
                 }
             }
@@ -582,6 +592,67 @@ impl<'i, P: AbstractSnapshotTracker, W: PrintWriter> RunFrame<'i, P, W> {
         } else {
             let e = exc_fmt!(ExcType::TypeError; "'{}' object does not support item assignment", target_val.py_type(Some(heap)));
             Err(e.with_frame(self.stack_frame(index.position)).into())
+        }
+    }
+
+    /// Assigns a value to an attribute on an object: `object.attr = value`.
+    ///
+    /// Currently only supports mutable dataclass instances. Returns an error for:
+    /// - Non-heap values (they don't have attributes)
+    /// - Immutable dataclasses (frozen=True)
+    /// - Other heap types that don't support attribute assignment
+    fn attr_assign(
+        &mut self,
+        namespaces: &mut Namespaces,
+        heap: &mut Heap<impl ResourceTracker>,
+        object_ident: &Identifier,
+        attr: &Attr,
+        target_position: CodeRange,
+        value_expr: &ExprLoc,
+    ) -> RunResult<Option<FrameExit>> {
+        // Evaluate the value first
+        let val = frame_ext_call!(self.execute_expr(namespaces, heap, value_expr)?);
+
+        // Get the object and set the attribute
+        let object_val = namespaces.get_var_mut(self.local_idx, object_ident, self.interns)?;
+        let frame = self.stack_frame(target_position);
+        if let Value::Ref(id) = object_val {
+            heap.with_entry_mut(*id, |heap, data| -> RunResult<()> {
+                match data {
+                    HeapData::Dataclass(dc) => {
+                        if dc.is_mutable() {
+                            // Allocate a heap string for the key since we need a Value for Dict lookup
+                            let key_id = heap.allocate(HeapData::Str(attr.to_string().into()))?;
+                            let key = Value::Ref(key_id);
+
+                            // Set the field - key ownership transferred to Dict
+                            // If the key already exists, the duplicate key is dropped inside set_field
+                            let old_val = dc.set_field(key, val, heap, self.interns)?;
+                            if let Some(old) = old_val {
+                                old.drop_with_heap(heap);
+                            }
+                            Ok(())
+                        } else {
+                            // Drop the value we were going to assign
+                            val.drop_with_heap(heap);
+                            Err(ExcType::attribute_error_frozen(dc.name(), attr.as_str()))
+                        }
+                    }
+                    other => {
+                        // Drop the value we were going to assign
+                        val.drop_with_heap(heap);
+                        let ty = other.py_type(Some(heap));
+                        Err(ExcType::attribute_error_no_setattr(ty, attr.as_str()))
+                    }
+                }
+            })
+            .map_err(|e| e.set_frame(frame))?;
+            Ok(None)
+        } else {
+            // Drop the value
+            val.drop_with_heap(heap);
+            let ty = object_val.py_type(Some(heap));
+            Err(ExcType::attribute_error_no_setattr(ty, attr.as_str()).set_frame(frame))
         }
     }
 
@@ -1242,9 +1313,9 @@ impl<'i, P: AbstractSnapshotTracker, W: PrintWriter> RunFrame<'i, P, W> {
         }
     }
 
+    /// Create frame without parent - the parent chain is built up by add_frame_info()
+    /// as the error propagates through the call stack
     fn stack_frame(&self, position: CodeRange) -> RawStackFrame {
-        // Create frame without parent - the parent chain is built up by add_frame_info()
-        // as the error propagates through the call stack
         RawStackFrame::new(position, self.name, None)
     }
 
@@ -1277,10 +1348,18 @@ struct HandlerResumeState<'a> {
 ///
 /// This builds the traceback chain by appending each caller's frame information
 /// to the exception, so the full call stack is visible when the error is displayed.
+///
+/// Note: AttributeError gets special handling - CPython doesn't show carets for it,
+/// so we suppress carets by using the `add_caller_frame_no_caret` method.
 fn add_frame_info(name: StringId, position: CodeRange, error: &mut RunError) {
     match error {
         RunError::Exc(exc) | RunError::UncatchableExc(exc) => {
-            exc.add_caller_frame(position, name);
+            // CPython doesn't show carets for AttributeError on attribute access
+            if exc.exc.exc_type() == ExcType::AttributeError {
+                exc.add_caller_frame_no_caret(position, name);
+            } else {
+                exc.add_caller_frame(position, name);
+            }
         }
         RunError::Internal(_) => {}
     }
