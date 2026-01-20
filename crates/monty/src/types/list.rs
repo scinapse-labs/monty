@@ -9,7 +9,7 @@ use crate::{
     exception_private::{ExcType, RunError, RunResult},
     for_iterator::ForIterator,
     heap::{Heap, HeapData, HeapId},
-    intern::{Interns, StringId, attr},
+    intern::{Interns, StaticStrings},
     io::PrintWriter,
     resource::{ResourceError, ResourceTracker},
     types::Type,
@@ -323,12 +323,12 @@ impl PyTrait for List {
         args: ArgValues,
         interns: &Interns,
     ) -> RunResult<Value> {
-        let Some(attr_id) = attr.string_id() else {
+        let Some(method) = attr.static_string() else {
             args.drop_with_heap(heap);
             return Err(ExcType::attribute_error(Type::List, attr.as_str(interns)));
         };
 
-        call_list_method(self, attr_id, args, heap, interns)
+        call_list_method(self, method, args, heap, interns)
     }
 }
 
@@ -338,39 +338,39 @@ impl PyTrait for List {
 ///
 /// # Arguments
 /// * `list` - The list to call the method on
-/// * `method_id` - The interned method name (e.g., `attr::APPEND`)
+/// * `method` - The method to call (e.g., `StaticStrings::Append`)
 /// * `args` - The method arguments
 /// * `heap` - The heap for allocation and reference counting
 /// * `interns` - The interns table for resolving interned strings
 fn call_list_method(
     list: &mut List,
-    method_id: StringId,
+    method: StaticStrings,
     args: ArgValues,
     heap: &mut Heap<impl ResourceTracker>,
     interns: &Interns,
 ) -> RunResult<Value> {
-    match method_id {
-        attr::APPEND => {
+    match method {
+        StaticStrings::Append => {
             let item = args.get_one_arg("list.append", heap)?;
             list.append(heap, item);
             Ok(Value::None)
         }
-        attr::INSERT => list_insert(list, args, heap),
-        attr::POP => list_pop(list, args, heap),
-        attr::REMOVE => list_remove(list, args, heap, interns),
-        attr::CLEAR => {
+        StaticStrings::Insert => list_insert(list, args, heap),
+        StaticStrings::Pop => list_pop(list, args, heap),
+        StaticStrings::Remove => list_remove(list, args, heap, interns),
+        StaticStrings::Clear => {
             args.check_zero_args("list.clear", heap)?;
             list_clear(list, heap);
             Ok(Value::None)
         }
-        attr::COPY => {
+        StaticStrings::Copy => {
             args.check_zero_args("list.copy", heap)?;
             Ok(list_copy(list, heap)?)
         }
-        attr::EXTEND => list_extend(list, args, heap, interns),
-        attr::INDEX => list_index(list, args, heap, interns),
-        attr::COUNT => list_count(list, args, heap, interns),
-        attr::REVERSE => {
+        StaticStrings::Extend => list_extend(list, args, heap, interns),
+        StaticStrings::Index => list_index(list, args, heap, interns),
+        StaticStrings::Count => list_count(list, args, heap, interns),
+        StaticStrings::Reverse => {
             args.check_zero_args("list.reverse", heap)?;
             list.items.reverse();
             Ok(Value::None)
@@ -378,7 +378,7 @@ fn call_list_method(
         // Note: list.sort is handled at VM level in call.rs to support key functions
         _ => {
             args.drop_with_heap(heap);
-            Err(ExcType::attribute_error(Type::List, interns.get_str(method_id)))
+            Err(ExcType::attribute_error(Type::List, method.into()))
         }
     }
 }

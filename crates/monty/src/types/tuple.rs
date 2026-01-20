@@ -19,7 +19,7 @@ use crate::{
     exception_private::{ExcType, RunResult},
     for_iterator::ForIterator,
     heap::{Heap, HeapData, HeapId},
-    intern::{Interns, attr},
+    intern::{Interns, StaticStrings},
     resource::ResourceTracker,
     types::Type,
     value::{Attr, Value},
@@ -185,17 +185,12 @@ impl PyTrait for Tuple {
         args: ArgValues,
         interns: &Interns,
     ) -> RunResult<Value> {
-        let Some(attr_id) = attr.string_id() else {
-            args.drop_with_heap(heap);
-            return Err(ExcType::attribute_error(Type::Tuple, attr.as_str(interns)));
-        };
-
-        match attr_id {
-            attr::INDEX => tuple_index(self, args, heap, interns),
-            attr::COUNT => tuple_count(self, args, heap, interns),
+        match attr.static_string() {
+            Some(StaticStrings::Index) => tuple_index(self, args, heap, interns),
+            Some(StaticStrings::Count) => tuple_count(self, args, heap, interns),
             _ => {
                 args.drop_with_heap(heap);
-                Err(ExcType::attribute_error(Type::Tuple, interns.get_str(attr_id)))
+                Err(ExcType::attribute_error(Type::Tuple, attr.as_str(interns)))
             }
         }
     }
