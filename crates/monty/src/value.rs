@@ -20,10 +20,7 @@ use crate::{
     heap::{Heap, HeapData, HeapId},
     intern::{BytesId, ExtFunctionId, FunctionId, Interns, LongIntId, StaticStrings, StringId},
     modules::ModuleFunctions,
-    resource::{
-        DepthGuard, ResourceError, ResourceTracker, check_div_size, check_lshift_size, check_pow_size,
-        check_repeat_size,
-    },
+    resource::{ResourceError, ResourceTracker, check_div_size, check_lshift_size, check_pow_size, check_repeat_size},
     types::{
         AttrCallResult, LongInt, Property, PyTrait, Str, Type,
         bytes::{bytes_repr_fmt, get_byte_at_index, get_bytes_slice},
@@ -161,7 +158,6 @@ impl PyTrait for Value {
         &self,
         other: &Self,
         heap: &mut Heap<impl ResourceTracker>,
-        guard: &mut DepthGuard,
         interns: &Interns,
     ) -> Result<bool, ResourceError> {
         match (self, other) {
@@ -239,7 +235,7 @@ impl PyTrait for Value {
                     return Ok(true);
                 }
                 // Need to use with_two for proper borrow management
-                heap.with_two(*id1, *id2, |heap, left, right| left.py_eq(right, heap, guard, interns))
+                heap.with_two(*id1, *id2, |heap, left, right| left.py_eq(right, heap, interns))
             }
 
             // Builtins equality - just check the enums are equal
@@ -260,12 +256,10 @@ impl PyTrait for Value {
         &self,
         other: &Self,
         heap: &mut Heap<impl ResourceTracker>,
-        guard: &mut DepthGuard,
         interns: &Interns,
     ) -> Result<Option<Ordering>, ResourceError> {
         // py_cmp currently only handles non-recursive types (numbers, strings, bytes)
-        // so we don't need to recurse through the guard. The guard parameter exists
-        // for API consistency with py_eq.
+        // so recursion depth tracking is not needed here.
         match (self, other) {
             (Self::Int(s), Self::Int(o)) => Ok(s.partial_cmp(o)),
             (Self::Float(s), Self::Float(o)) => Ok(s.partial_cmp(o)),
@@ -273,8 +267,8 @@ impl PyTrait for Value {
             (Self::Float(s), Self::Int(o)) => Ok(s.partial_cmp(&(*o as f64))),
             // Bool promotion: convert to Int and re-dispatch. Recursion is bounded
             // to at most 2 levels (Bool→Int, then Int matches directly above).
-            (Self::Bool(s), _) => Self::Int(i64::from(*s)).py_cmp(other, heap, guard, interns),
-            (_, Self::Bool(s)) => self.py_cmp(&Self::Int(i64::from(*s)), heap, guard, interns),
+            (Self::Bool(s), _) => Self::Int(i64::from(*s)).py_cmp(other, heap, interns),
+            (_, Self::Bool(s)) => self.py_cmp(&Self::Int(i64::from(*s)), heap, interns),
             // Int vs LongInt comparison
             (Self::Int(a), Self::Ref(id)) => {
                 if let HeapData::LongInt(li) = heap.get(*id) {
@@ -362,7 +356,6 @@ impl PyTrait for Value {
         f: &mut impl Write,
         heap: &Heap<impl ResourceTracker>,
         heap_ids: &mut AHashSet<HeapId>,
-        guard: &mut DepthGuard,
         interns: &Interns,
     ) -> std::fmt::Result {
         match self {
@@ -404,7 +397,7 @@ impl PyTrait for Value {
                     }
                 } else {
                     heap_ids.insert(*id);
-                    let result = heap.get(*id).py_repr_fmt(f, heap, heap_ids, guard, interns);
+                    let result = heap.get(*id).py_repr_fmt(f, heap, heap_ids, interns);
                     heap_ids.remove(id);
                     result
                 }
@@ -414,16 +407,11 @@ impl PyTrait for Value {
         }
     }
 
-    fn py_str(
-        &self,
-        heap: &Heap<impl ResourceTracker>,
-        guard: &mut DepthGuard,
-        interns: &Interns,
-    ) -> Cow<'static, str> {
+    fn py_str(&self, heap: &Heap<impl ResourceTracker>, interns: &Interns) -> Cow<'static, str> {
         match self {
             Self::InternString(string_id) => interns.get_str(*string_id).to_owned().into(),
-            Self::Ref(id) => heap.get(*id).py_str(heap, guard, interns),
-            _ => self.py_repr(heap, guard, interns),
+            Self::Ref(id) => heap.get(*id).py_str(heap, interns),
+            _ => self.py_repr(heap, interns),
         }
     }
 
@@ -1558,15 +1546,21 @@ impl Value {
 
     /// Computes the hash value for this value, used for dict keys.
     ///
-    /// Returns Some(hash) for hashable types (immediate values and immutable heap types).
-    /// Returns None for unhashable types (list, dict).
+    /// Returns `Ok(Some(hash))` for hashable types (immediate values and immutable heap types).
+    /// Returns `Ok(None)` for unhashable types (list, dict).
+    /// Returns `Err(ResourceError::Recursion)` if the recursion limit is exceeded
+    /// while hashing deeply nested containers (e.g., tuples of tuples).
     ///
     /// For heap-allocated values (Ref variant), this computes the hash lazily
     /// on first use and caches it for subsequent calls.
     ///
     /// The `interns` parameter is needed for InternString/InternBytes to look up
     /// their actual content and hash it consistently with equivalent heap Str/Bytes.
-    pub fn py_hash(&self, heap: &mut Heap<impl ResourceTracker>, interns: &Interns) -> Option<u64> {
+    pub fn py_hash(
+        &self,
+        heap: &mut Heap<impl ResourceTracker>,
+        interns: &Interns,
+    ) -> Result<Option<u64>, ResourceError> {
         // strings bytes bigints and heap allocated values have their own hashing logic
         match self {
             // Hash just the actual string or bytes content for consistency with heap Str/Bytes
@@ -1574,12 +1568,12 @@ impl Value {
             Self::InternString(string_id) => {
                 let mut hasher = DefaultHasher::new();
                 interns.get_str(*string_id).hash(&mut hasher);
-                return Some(hasher.finish());
+                return Ok(Some(hasher.finish()));
             }
             Self::InternBytes(bytes_id) => {
                 let mut hasher = DefaultHasher::new();
                 interns.get_bytes(*bytes_id).hash(&mut hasher);
-                return Some(hasher.finish());
+                return Ok(Some(hasher.finish()));
             }
             // Hash BigInt consistently with LongInt (using sign and bytes for large values)
             Self::InternLongInt(long_int_id) => {
@@ -1588,7 +1582,7 @@ impl Value {
                 let (sign, bytes) = bi.to_bytes_le();
                 sign.hash(&mut hasher);
                 bytes.hash(&mut hasher);
-                return Some(hasher.finish());
+                return Ok(Some(hasher.finish()));
             }
             // For heap-allocated values (includes Range and Exception), compute hash lazily and cache it
             Self::Ref(id) => return heap.get_or_compute_hash(*id, interns),
@@ -1622,7 +1616,7 @@ impl Value {
             #[cfg(feature = "ref-count-panic")]
             Self::Dereferenced => panic!("Cannot access Dereferenced object"),
         }
-        Some(hasher.finish())
+        Ok(Some(hasher.finish()))
     }
 
     /// TODO this doesn't have many tests!!! also doesn't cover bytes
@@ -1646,18 +1640,16 @@ impl Value {
                 // (which needs &mut Heap for comparing nested heap values).
                 heap.with_entry_mut(*heap_id, |heap, data| match data {
                     HeapData::List(list) => {
-                        let mut guard = DepthGuard::default();
                         for el in list.as_slice() {
-                            if item.py_eq(el, heap, &mut guard, interns)? {
+                            if item.py_eq(el, heap, interns)? {
                                 return Ok(true);
                             }
                         }
                         Ok(false)
                     }
                     HeapData::Tuple(tuple) => {
-                        let mut guard = DepthGuard::default();
                         for el in tuple.as_slice() {
-                            if item.py_eq(el, heap, &mut guard, interns)? {
+                            if item.py_eq(el, heap, interns)? {
                                 return Ok(true);
                             }
                         }

@@ -543,6 +543,12 @@ impl Scheduler {
             value.drop_with_heap(heap);
         }
 
+        // Restore this task's depth contribution before dropping namespaces,
+        // since save_task_context subtracted it and drop_with_heap will decrement.
+        let task_depth = task.frames.len();
+        let global_depth = heap.get_recursion_depth();
+        heap.set_recursion_depth(global_depth + task_depth);
+
         // Clean up frame cell references and namespaces
         for frame in std::mem::take(&mut task.frames) {
             for cell_id in frame.cells {
